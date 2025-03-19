@@ -2,13 +2,11 @@ from PyQt5.QtWidgets import (QMainWindow, QApplication, QWidget, QVBoxLayout, QH
                            QGroupBox, QTabWidget, QPushButton, QLabel, QLineEdit, QTextEdit, 
                            QComboBox, QCheckBox, QRadioButton, QButtonGroup, QFrame, QSpacerItem, 
                            QSizePolicy, QAction, QFileDialog, QMenu, QMenuBar, QMessageBox, 
-                           QSystemTrayIcon, QToolBar, QInputDialog, QDialog, QProgressDialog, QFormLayout, QListWidget, QScrollArea, QSpinBox)
+                           QSystemTrayIcon, QToolBar, QInputDialog, QDialog, QProgressDialog, QFormLayout, QListWidget, QScrollArea, QSpinBox, QTableWidgetItem)
 from PyQt5.QtCore import Qt, QTimer, QThread, pyqtSignal, QSettings, QSize, QUrl, QRect, QPoint
 from PyQt5.QtGui import QIcon, QPixmap, QDesktopServices, QFont, QColor
 
 from .routine_tab import RoutineTab
-# ScriptTab 제거
-# from .script_tab import ScriptTab
 from .account_widget import AccountWidget
 from .task_settings_dialog import TaskSettingsDialog
 from .settings_dialog import SettingsDialog
@@ -20,12 +18,9 @@ from ..api.auth import NaverAuth
 from ..api.cafe import CafeAPI
 from ..api.ai_generator import AIGenerator
 from .styles import DARK_STYLE
-from ..utils.settings_manager import SettingsManager
-from ..api.auth import NaverAuth
 from ..worker import Worker
 import time
 import os
-from PyQt5.QtCore import QUrl
 import sys
 
 class TaskDetailDialog(QDialog):
@@ -595,13 +590,9 @@ class MainWindow(QMainWindow):
         
         # 모니터링 위젯 생성
         self.monitor_widget = RoutineTab(self.log)
-        self.monitor_widget.set_main_window(self)  # MainWindow 인스턴스 설정
         
         # 모니터링 위젯 시그널 연결
-        # self.monitor_widget.add_task_clicked.connect(self.add_task)
-        # self.monitor_widget.remove_task_clicked.connect(self.remove_task)
-        # self.monitor_widget.remove_all_clicked.connect(self.remove_all_tasks)
-        # self.monitor_widget.execute_tasks_clicked.connect(self.run_tasks)
+        self.monitor_widget.execute_tasks_clicked.connect(self.run_tasks)
         
         # 라이선스 확인
         if not self.check_and_create_license():
@@ -957,7 +948,7 @@ class MainWindow(QMainWindow):
         
         # 윈도우 설정
         self.setWindowTitle("네이버 카페 댓글 프로그램")
-        self.setGeometry(100, 100, 1050, 700)
+        self.setGeometry(100, 100, 1050, 750)
         self.setStyleSheet(DARK_STYLE)
 
     def create_menu_bar(self):
@@ -1009,14 +1000,19 @@ class MainWindow(QMainWindow):
         help_menu = menubar.addMenu('도움말')
         
         # 라이선스 정보 메뉴
-        license_action = QAction('라이선스 정보', self)
-        license_action.triggered.connect(self.show_license_info)
-        help_menu.addAction(license_action)
+        # license_action = QAction('라이선스 정보', self)
+        # license_action.triggered.connect(self.show_license_info)
+        # help_menu.addAction(license_action)
         
         # 프로그램 정보 메뉴
         about_action = QAction('프로그램 정보', self)
         about_action.triggered.connect(self.show_about_info)
         help_menu.addAction(about_action)
+        
+        # 개발문의하기 메뉴
+        contact_action = QAction('개발문의하기', self)
+        contact_action.triggered.connect(self.show_contact_info)
+        help_menu.addAction(contact_action)
 
     def show_task_settings_dialog(self):
         """작업 설정 관리 대화상자 표시"""
@@ -1039,12 +1035,33 @@ class MainWindow(QMainWindow):
     def show_about_info(self):
         """프로그램 정보 표시"""
         message = """
-네이버 카페 댓글 프로그램 v1.0
+네이버 카페 키워드 게시글 수집 프로그램
 
-© 2023 All Rights Reserved.
+© 2025 bedogdog. All Rights Reserved.
         """
         
         QMessageBox.information(self, "프로그램 정보", message)
+        
+    def show_contact_info(self):
+        """개발문의 정보 표시 및 링크 열기"""
+        message = """
+개발 문의는 아래 텔레그램으로 연락해주세요:
+@bedogdog
+
+링크를 클릭하시겠습니까?
+        """
+        
+        reply = QMessageBox.question(
+            self, 
+            "개발문의하기", 
+            message,
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.Yes
+        )
+        
+        if reply == QMessageBox.Yes:
+            # 텔레그램 링크 열기
+            QDesktopServices.openUrl(QUrl("https://t.me/bedogdog"))
 
     def show_settings_dialog(self):
         """설정 관리 대화상자 표시"""
@@ -1193,7 +1210,7 @@ class MainWindow(QMainWindow):
             self.tasks = settings_data['tasks']
             self.update_task_list()
             
-        # 작업 설정 정복
+        # 작업 설정 적용
         if 'task_settings' in settings_data:
             task_settings = settings_data['task_settings']
             # 모니터 위젯에 설정 적용
@@ -1304,17 +1321,24 @@ class MainWindow(QMainWindow):
         
         # 모니터 위젯에 댓글 정보 추가
         try:
-            # monitor_widget에 직접 댓글 정보 추가
-            if hasattr(self, 'monitor_widget') and self.monitor_widget:
-                self.monitor_widget.add_task_monitor_row(post_info)
-                
-            # 루틴 탭의 모니터 위젯에 추가 (이전 코드 유지)
-            if hasattr(self, 'routine_tab') and self.routine_tab:
-                self.routine_tab.add_task_monitor_row(post_info)
-                
-            # script_tab 관련 코드 제거
-            # if hasattr(self, 'script_tab') and self.script_tab:
-            #     self.script_tab.add_task_monitor_row(post_info)
+            # 현재 테이블에 행 추가
+            row = self.monitor_widget.task_monitor.rowCount()
+            self.monitor_widget.task_monitor.insertRow(row)
+            
+            # 아이템 생성
+            no_item = QTableWidgetItem(str(row + 1))
+            id_item = QTableWidgetItem(post_info.get('account_id', ''))
+            content_item = QTableWidgetItem(post_info.get('content', ''))
+            url_item = QTableWidgetItem(post_info.get('url', ''))
+            
+            # 아이템 설정
+            self.monitor_widget.task_monitor.setItem(row, 0, no_item)
+            self.monitor_widget.task_monitor.setItem(row, 1, id_item)
+            self.monitor_widget.task_monitor.setItem(row, 2, content_item)
+            self.monitor_widget.task_monitor.setItem(row, 3, url_item)
+            
+            # 새로 추가된 행으로 스크롤
+            self.monitor_widget.task_monitor.scrollToBottom()
         except Exception as e:
             self.on_log_message({
                 'message': f"모니터 위젯에 댓글 정보 추가 중 오류 발생: {str(e)}",
@@ -1695,3 +1719,33 @@ class MainWindow(QMainWindow):
         
         # 검증 완료 후 UI 업데이트
         self.validate_api_btn.setEnabled(True)
+
+    def run_tasks(self, is_manual_run):
+        """작업을 실행하는 메서드"""
+        self.log.info("작업을 실행합니다.")
+        
+        # 작업 실행 전 상태 체크
+        if not self.monitor_widget.is_running:
+            self.log.info("작업을 실행할 수 있는 상태입니다.")
+            
+            # 작업 실행
+            self.monitor_widget.is_running = True
+            self.monitor_widget.execute_btn.setText("중지")
+            self.monitor_widget.execute_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #d65c5c;
+                    color: white;
+                    border: none;
+                    border-radius: 4px;
+                    padding: 10px;
+                    font-size: 14px;
+                    min-height: 40px;
+                }
+                QPushButton:hover {
+                    background-color: #b84a4a;
+                }
+            """)
+            
+            self.log.info("작업이 성공적으로 실행되었습니다.")
+        else:
+            self.log.info("작업이 이미 실행 중입니다. 상태 변경이 필요하지 않습니다.")
