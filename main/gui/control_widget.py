@@ -86,18 +86,7 @@ class ControlWidget(QWidget):
         execute_layout.addWidget(self.execute_btn)
         execute_layout.addWidget(self.stop_btn)
 
-        # 설정 버튼 레이아웃
-        settings_layout = QHBoxLayout()
-        self.save_btn = QPushButton('설정 저장')
-        self.load_btn = QPushButton('설정 불러오기')
-        self.init_btn = QPushButton('설정 초기화')
-
-        settings_layout.addWidget(self.save_btn)
-        settings_layout.addWidget(self.load_btn)
-        settings_layout.addWidget(self.init_btn)
-
         layout.addLayout(execute_layout)
-        layout.addLayout(settings_layout)
         
         group_box.setLayout(layout)
         

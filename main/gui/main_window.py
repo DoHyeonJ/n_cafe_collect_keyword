@@ -2,7 +2,7 @@ from PyQt5.QtWidgets import (QMainWindow, QApplication, QWidget, QVBoxLayout, QH
                            QGroupBox, QTabWidget, QPushButton, QLabel, QLineEdit, QTextEdit, 
                            QComboBox, QCheckBox, QRadioButton, QButtonGroup, QFrame, QSpacerItem, 
                            QSizePolicy, QAction, QFileDialog, QMenu, QMenuBar, QMessageBox, 
-                           QSystemTrayIcon, QToolBar, QInputDialog, QDialog, QProgressDialog, QFormLayout, QListWidget, QScrollArea)
+                           QSystemTrayIcon, QToolBar, QInputDialog, QDialog, QProgressDialog, QFormLayout, QListWidget, QScrollArea, QSpinBox)
 from PyQt5.QtCore import Qt, QTimer, QThread, pyqtSignal, QSettings, QSize, QUrl, QRect, QPoint
 from PyQt5.QtGui import QIcon, QPixmap, QDesktopServices, QFont, QColor
 
@@ -10,7 +10,6 @@ from .routine_tab import RoutineTab
 # ScriptTab 제거
 # from .script_tab import ScriptTab
 from .account_widget import AccountWidget
-from .settings_widget import SettingsWidget
 from .task_settings_dialog import TaskSettingsDialog
 from .settings_dialog import SettingsDialog
 
@@ -19,6 +18,7 @@ from ..utils.licence import Licence
 from ..utils.settings_manager import SettingsManager
 from ..api.auth import NaverAuth
 from ..api.cafe import CafeAPI
+from ..api.ai_generator import AIGenerator
 from .styles import DARK_STYLE
 from ..utils.settings_manager import SettingsManager
 from ..api.auth import NaverAuth
@@ -598,8 +598,8 @@ class MainWindow(QMainWindow):
         self.monitor_widget.set_main_window(self)  # MainWindow 인스턴스 설정
         
         # 모니터링 위젯 시그널 연결
-        self.monitor_widget.add_task_clicked.connect(self.add_task)
-        self.monitor_widget.remove_task_clicked.connect(self.remove_task)
+        # self.monitor_widget.add_task_clicked.connect(self.add_task)
+        # self.monitor_widget.remove_task_clicked.connect(self.remove_task)
         # self.monitor_widget.remove_all_clicked.connect(self.remove_all_tasks)
         # self.monitor_widget.execute_tasks_clicked.connect(self.run_tasks)
         
@@ -713,22 +713,220 @@ class MainWindow(QMainWindow):
         # 계정 위젯 시그널 연결
         self.account_widget.login_success.connect(self.on_login_success)
         self.account_widget.account_added.connect(self.add_account_to_list)
-        # self.account_widget.account_removed.connect(self.remove_account_from_list) - 삭제된 시그널
-        # self.account_widget.account_selected.connect(self.on_account_selected) - 삭제된 시그널
         
         # 설정 영역 (좌측 하단)
         settings_group = QGroupBox("설정")
         settings_layout = QVBoxLayout()
         settings_group.setLayout(settings_layout)
         
-        # 설정 위젯 생성 (탭 구조 대신 단일 위젯으로 변경)
-        self.settings_widget = SettingsWidget(self.log)
-        settings_layout.addWidget(self.settings_widget)
+        # 작업 설정 정보 표시
+        settings_info = QWidget()
+        settings_info_layout = QVBoxLayout()
+        settings_info_layout.setSpacing(10)
         
-        # 설정 위젯 버튼 시그널 연결
-        self.settings_widget.save_btn.clicked.connect(self.save_settings)
-        self.settings_widget.load_btn.clicked.connect(self.load_settings)
-        self.settings_widget.reset_btn.clicked.connect(self.reset_settings)
+        # 검색 설정 영역
+        search_settings = QWidget()
+        search_layout = QVBoxLayout()
+        search_layout.setContentsMargins(0, 0, 0, 0)
+        search_layout.setSpacing(10)
+        
+        # 검색 키워드 입력
+        keyword_widget = QWidget()
+        keyword_layout = QHBoxLayout()
+        keyword_layout.setContentsMargins(0, 0, 0, 0)
+        
+        keyword_label = QLabel("검색 키워드:")
+        keyword_label.setStyleSheet("color: white;")
+        self.keyword_input = QLineEdit()
+        self.keyword_input.setPlaceholderText("검색할 키워드를 입력하세요")
+        self.keyword_input.setStyleSheet("""
+            QLineEdit {
+                background-color: #2b2b2b;
+                color: white;
+                border: 1px solid #3d3d3d;
+                padding: 8px;
+                border-radius: 4px;
+            }
+            QLineEdit:focus {
+                border: 1px solid #5c85d6;
+            }
+        """)
+        
+        keyword_layout.addWidget(keyword_label)
+        keyword_layout.addWidget(self.keyword_input)
+        keyword_widget.setLayout(keyword_layout)
+        
+        # 검색 대상 설정
+        target_widget = QWidget()
+        target_layout = QHBoxLayout()
+        target_layout.setContentsMargins(0, 0, 0, 0)
+        
+        target_label = QLabel("대상:")
+        target_label.setStyleSheet("color: white;")
+        self.target_combo = QComboBox()
+        self.target_combo.addItems(["전체글", "거래글", "일반글", "카페명"])
+        self.target_combo.setStyleSheet("""
+            QComboBox {
+                background-color: #2b2b2b;
+                color: white;
+                border: 1px solid #3d3d3d;
+                padding: 5px;
+                border-radius: 4px;
+            }
+            QComboBox::drop-down {
+                border: none;
+            }
+            QComboBox::down-arrow {
+                image: url(resources/down_arrow.png);
+                width: 12px;
+                height: 12px;
+            }
+        """)
+        
+        target_layout.addWidget(target_label)
+        target_layout.addWidget(self.target_combo)
+        target_widget.setLayout(target_layout)
+        
+        # 정렬 설정
+        sort_widget = QWidget()
+        sort_layout = QHBoxLayout()
+        sort_layout.setContentsMargins(0, 0, 0, 0)
+        
+        sort_label = QLabel("정렬:")
+        sort_label.setStyleSheet("color: white;")
+        self.sort_combo = QComboBox()
+        self.sort_combo.addItems(["관련도순", "최신순", "1시간", "1일", "1주", "1개월", "3개월", "6개월", "1년"])
+        self.sort_combo.setStyleSheet(self.target_combo.styleSheet())
+        
+        sort_layout.addWidget(sort_label)
+        sort_layout.addWidget(self.sort_combo)
+        sort_widget.setLayout(sort_layout)
+        
+        # 거래방법 설정
+        trade_widget = QWidget()
+        trade_layout = QHBoxLayout()
+        trade_layout.setContentsMargins(0, 0, 0, 0)
+        
+        trade_label = QLabel("거래방법:")
+        trade_label.setStyleSheet("color: white;")
+        self.trade_combo = QComboBox()
+        self.trade_combo.addItems(["전체", "안전결제", "일반결제"])
+        self.trade_combo.setStyleSheet(self.target_combo.styleSheet())
+        
+        trade_layout.addWidget(trade_label)
+        trade_layout.addWidget(self.trade_combo)
+        trade_widget.setLayout(trade_layout)
+        
+        # 거래상태 설정
+        status_widget = QWidget()
+        status_layout = QHBoxLayout()
+        status_layout.setContentsMargins(0, 0, 0, 0)
+        
+        status_label = QLabel("거래상태:")
+        status_label.setStyleSheet("color: white;")
+        self.status_combo = QComboBox()
+        self.status_combo.addItems(["전체", "판매중", "판매완료"])
+        self.status_combo.setStyleSheet(self.target_combo.styleSheet())
+        
+        status_layout.addWidget(status_label)
+        status_layout.addWidget(self.status_combo)
+        status_widget.setLayout(status_layout)
+        
+        # AI 설정 영역
+        ai_settings = QWidget()
+        ai_layout = QVBoxLayout()
+        ai_layout.setContentsMargins(0, 0, 0, 0)
+        ai_layout.setSpacing(10)
+        
+        # AI API Key 설정
+        api_key_widget = QWidget()
+        api_key_layout = QHBoxLayout()
+        api_key_layout.setContentsMargins(0, 0, 0, 0)
+        api_key_layout.setSpacing(5)
+        
+        api_key_label = QLabel("AI API Key:")
+        api_key_label.setStyleSheet("color: white;")
+        self.api_key_input = QLineEdit()
+        self.api_key_input.setPlaceholderText("API Key를 입력하세요")
+        self.api_key_input.setStyleSheet("""
+            QLineEdit {
+                background-color: #2b2b2b;
+                color: white;
+                border: 1px solid #3d3d3d;
+                padding: 8px;
+                border-radius: 4px;
+            }
+            QLineEdit:focus {
+                border: 1px solid #5c85d6;
+            }
+        """)
+        
+        # 검증 버튼 추가
+        self.validate_api_btn = QPushButton("검증")
+        self.validate_api_btn.setFixedWidth(60)
+        self.validate_api_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #5c85d6;
+                color: white;
+                border: none;
+                padding: 8px;
+                border-radius: 4px;
+                font-size: 12px;
+            }
+            QPushButton:hover {
+                background-color: #4a6fb8;
+            }
+            QPushButton:disabled {
+                background-color: #666666;
+            }
+        """)
+        self.validate_api_btn.clicked.connect(self.validate_api_key)
+        
+        # 검증 상태 레이블 추가
+        self.api_key_status = QLabel("")
+        self.api_key_status.setStyleSheet("color: #aaaaaa; margin-left: 5px;")
+        
+        api_key_layout.addWidget(api_key_label)
+        api_key_layout.addWidget(self.api_key_input)
+        api_key_layout.addWidget(self.validate_api_btn)
+        api_key_layout.addWidget(self.api_key_status)
+        api_key_widget.setLayout(api_key_layout)
+        
+        # AI 분석 키워드 설정
+        ai_keyword_widget = QWidget()
+        ai_keyword_layout = QHBoxLayout()
+        ai_keyword_layout.setContentsMargins(0, 0, 0, 0)
+        
+        ai_keyword_label = QLabel("AI 분석 키워드:")
+        ai_keyword_label.setStyleSheet("color: white;")
+        self.ai_keyword_input = QLineEdit()
+        self.ai_keyword_input.setPlaceholderText("분석할 키워드를 입력하세요")
+        self.ai_keyword_input.setStyleSheet(self.api_key_input.styleSheet())
+        
+        ai_keyword_layout.addWidget(ai_keyword_label)
+        ai_keyword_layout.addWidget(self.ai_keyword_input)
+        ai_keyword_widget.setLayout(ai_keyword_layout)
+        
+        # AI 설정 추가
+        ai_layout.addWidget(api_key_widget)
+        ai_layout.addWidget(ai_keyword_widget)
+        ai_settings.setLayout(ai_layout)
+        
+        # 검색 설정 추가
+        search_layout.addWidget(keyword_widget)  # 검색 키워드 추가
+        search_layout.addWidget(target_widget)
+        search_layout.addWidget(sort_widget)
+        search_layout.addWidget(trade_widget)
+        search_layout.addWidget(status_widget)
+        search_settings.setLayout(search_layout)
+        
+        # 설정 정보 레이아웃에 위젯 추가
+        settings_info_layout.addWidget(search_settings)  # 검색 설정 추가
+        settings_info_layout.addWidget(ai_settings)  # AI 설정 추가
+        settings_info.setLayout(settings_info_layout)
+        
+        # 설정 영역에 위젯 추가
+        settings_layout.addWidget(settings_info)
         
         # 좌측 레이아웃에 위젯 추가 (비율 6:4)
         left_layout.addWidget(account_group, 6)
@@ -750,16 +948,16 @@ class MainWindow(QMainWindow):
         # 우측 레이아웃에 모니터링 그룹 추가
         right_layout.addWidget(monitor_group)
         
-        # 메인 레이아웃에 좌우 위젯 추가 (비율 5:5)
-        main_layout.addWidget(left_widget, 5)
-        main_layout.addWidget(right_widget, 5)
+        # 메인 레이아웃에 좌우 위젯 추가 (비율 3:7)
+        main_layout.addWidget(left_widget, 3)
+        main_layout.addWidget(right_widget, 7)
         
         # 메뉴바 생성
         self.create_menu_bar()
         
         # 윈도우 설정
         self.setWindowTitle("네이버 카페 댓글 프로그램")
-        self.setGeometry(100, 100, 1200, 900)
+        self.setGeometry(100, 100, 1050, 700)
         self.setStyleSheet(DARK_STYLE)
 
     def create_menu_bar(self):
@@ -884,7 +1082,7 @@ class MainWindow(QMainWindow):
     
     def apply_settings(self, settings_data):
         """불러온 설정 적용"""
-        # 계정 정보 복원 전에 로그인 필요 여부 확인
+        # 계정 정복 전에 로그인 필요 여부 확인
         accounts_to_login = []
         
         if 'accounts' in settings_data:
@@ -929,38 +1127,16 @@ class MainWindow(QMainWindow):
         self.accounts = {}
         self.tasks = []
         
-        # 계정 정보 복원 (단일 계정만 지원)
+        # 계정 정복 전에 로그인 필요 여부 확인
+        accounts_to_login = []
+        
         if 'accounts' in settings_data:
             for account_id, account_info in settings_data['accounts'].items():
-                # 첫 번째 계정만 저장하고 나머지는 무시
-                # 기존 계정의 헤더 정보가 유효한 경우 유지
-                headers = {}
-                if account_id in old_accounts and self.is_header_valid(old_accounts[account_id].get('headers', {})):
-                    headers = old_accounts[account_id]['headers']
-                    self.log.info(f"계정 '{account_id}'의 기존 헤더 정보를 유지합니다.")
-                
-                # 계정 추가
-                self.accounts[account_id] = {
-                    'pw': account_info['pw'],
-                    'headers': headers,
-                    'cafe_list': old_accounts.get(account_id, {}).get('cafe_list', [])
-                }
-                
-                # 첫 번째 계정만 처리하고 종료
-                break
+                # 로그인이 필요한 계정인지 확인
+                if account_id not in self.accounts or self.accounts[account_id]['headers'] is None:
+                    accounts_to_login.append((account_id, account_info['pw']))
         
-        # 작업 목록 복원
-        if 'tasks' in settings_data:
-            self.tasks = settings_data['tasks']
-            self.update_task_list()
-            
-        # 작업 설정 정보 복원
-        if 'task_settings' in settings_data:
-            task_settings = settings_data['task_settings']
-            # 모니터 위젯에 설정 적용
-            self.monitor_widget.load_settings(task_settings)
-            
-        # 로그인 필요한 계정들에 대해 로그인 진행 (첫 번째 계정만)
+        # 로그인이 필요한 계정이 있으면 사용자에게 알림
         if accounts_to_login:
             self.log.info(f"계정에 대해 로그인을 진행합니다...")
             
@@ -976,37 +1152,22 @@ class MainWindow(QMainWindow):
             
             login_success_count = 0
             
-            # 첫 번째 계정만 로그인
-            account_id, password = accounts_to_login[0]
-            
-            # 진행 상태 업데이트
-            progress_dialog.setValue(0)
-            progress_dialog.setLabelText(f"계정 '{account_id}' 로그인 중...")
-            QApplication.processEvents()  # UI 업데이트
-            
-            # 로그인 시도
-            auth = NaverAuth()
-            auth.set_credentials(account_id, password)
-            success, headers = auth.login()
-            
-            if success:
-                # 로그인 성공 시 헤더 정보 업데이트
-                self.accounts[account_id]['headers'] = headers
+            # 로그인 진행
+            for account_id, password in accounts_to_login:
+                auth = NaverAuth()
+                auth.set_credentials(account_id, password)
+                success, headers = auth.login()
                 
-                # 카페 목록 로드
-                self.load_cafe_list(account_id, headers)
-                login_success_count += 1
-                
-                # AccountWidget에 계정 정보 설정
-                self.account_widget.id_input.setText(account_id)
-                self.account_widget.pw_input.setText(password)
-                self.account_widget.current_account = account_id
-                self.account_widget.status_label.setText(f"로그인 상태: {account_id} (로그인됨)")
-                self.account_widget.status_label.setStyleSheet("color: #4CAF50; margin-top: 10px; font-weight: bold;")
-                
-                self.log.info(f"계정 '{account_id}' 로그인 성공")
-            else:
-                self.log.error(f"계정 '{account_id}' 로그인 실패")
+                if success:
+                    # 로그인 성공 시 헤더 정보 업데이트
+                    self.accounts[account_id] = {
+                        'pw': password,
+                        'headers': headers
+                    }
+                    self.log.info(f"계정 '{account_id}' 로그인 성공")
+                    login_success_count += 1
+                else:
+                    self.log.error(f"계정 '{account_id}' 로그인 실패")
             
             # 진행 대화상자 완료 및 닫기
             progress_dialog.setValue(1)
@@ -1026,6 +1187,17 @@ class MainWindow(QMainWindow):
                     f'계정의 로그인에 실패했습니다.\n'
                     f'해당 계정은 수동으로 다시 로그인해주세요.'
                 )
+        
+        # 작업 목록 복원
+        if 'tasks' in settings_data:
+            self.tasks = settings_data['tasks']
+            self.update_task_list()
+            
+        # 작업 설정 정복
+        if 'task_settings' in settings_data:
+            task_settings = settings_data['task_settings']
+            # 모니터 위젯에 설정 적용
+            self.monitor_widget.load_settings(task_settings)
         
         self.log.info("설정이 성공적으로 적용되었습니다.")
         return True
@@ -1082,23 +1254,11 @@ class MainWindow(QMainWindow):
                 self.log.info(f'새 계정 추가 및 로그인 성공: {account_id}')
             
             # 작업 수행 가능 상태로 UI 업데이트
-            self.monitor_widget.add_log_message({
-                'message': f'계정 {account_id} 로그인 성공. 이제 작업을 추가할 수 있습니다.',
-                'color': 'green'
-            })
+            # self.monitor_widget.add_log_message({
+            #     'message': f'계정 {account_id} 로그인 성공. 이제 작업을 추가할 수 있습니다.',
+            #     'color': 'green'
+            # })
 
-    def on_account_selected(self, account_id):
-        """계정 선택 시 호출 - 더 이상 사용하지 않음"""
-        # 작업 상태 로깅 (모든 작업 완료 여부 확인은 Worker에서 처리)
-        # task_id = task.get('id', '알 수 없음')
-        # task_status = task.get('status', '알 수 없음')
-        
-        # self.monitor_widget.add_log_message({
-        #     'message': f"작업 #{task_id} 상태 변경: {task_status}",
-        #     'color': 'blue'
-        # })
-        pass
-            
     def on_task_error(self, task, error_msg):
         """작업 오류 발생 시 호출되는 메서드"""
         # 작업 오류 로그 추가
@@ -1357,24 +1517,6 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, '경고', '계정이 로그인되지 않았습니다.\n로그인 후 다시 시도해주세요.')
             return
         
-        # 설정 가져오기
-        settings = self.settings_widget.get_settings()
-        
-        # 검색 키워드 확인
-        if not settings.get('search_keywords'):
-            QMessageBox.warning(self, '경고', '검색 키워드를 입력해주세요.')
-            return
-            
-        # AI 분석 키워드 확인 (AI 분석을 사용하는 경우)
-        if settings.get('use_ai_analysis') and not settings.get('ai_keywords'):
-            QMessageBox.warning(self, '경고', 'AI 분석 키워드를 입력해주세요.')
-            return
-            
-        # AI API 키 확인 (AI 분석을 사용하는 경우)
-        if settings.get('use_ai_analysis') and not settings.get('api_key'):
-            QMessageBox.warning(self, '경고', 'AI API 키를 입력해주세요.')
-            return
-            
         # 작업 ID 생성
         task_id = len(self.tasks) + 1
         
@@ -1382,7 +1524,6 @@ class MainWindow(QMainWindow):
         task_info = {
             'id': task_id,
             'account_id': account_id,  # 주 계정 ID
-            'settings': settings,  # 검색 및 분석 설정
             'status': '대기 중',
             'progress': 0,
             'completed_count': 0,
@@ -1398,8 +1539,7 @@ class MainWindow(QMainWindow):
         self.update_task_list()
         
         # 로그 메시지
-        keywords_str = ', '.join(settings.get('search_keywords', []))
-        msg = f'작업 추가됨: 계정 {account_id}, 키워드 [{keywords_str}], 대상 {settings.get("target")}'
+        msg = f'작업 추가됨: 계정 {account_id}'
         self.log.info(msg)
         self.monitor_widget.add_log_message({'message': msg, 'color': 'blue'})
         
@@ -1408,11 +1548,8 @@ class MainWindow(QMainWindow):
 
     def save_settings(self):
         """설정 저장"""
-        if not hasattr(self, 'settings_widget'):
-            return
-            
         # 설정 가져오기
-        settings = self.settings_widget.get_settings()
+        settings = self.get_all_settings()
         
         # 설정 저장 대화상자 표시
         filename, _ = QFileDialog.getSaveFileName(
@@ -1438,9 +1575,6 @@ class MainWindow(QMainWindow):
     
     def load_settings(self):
         """설정 불러오기"""
-        if not hasattr(self, 'settings_widget'):
-            return
-            
         # 설정 파일 선택 대화상자 표시
         filename, _ = QFileDialog.getOpenFileName(
             self, 
@@ -1458,7 +1592,7 @@ class MainWindow(QMainWindow):
                 settings = json.load(f)
                 
             # 설정 적용
-            self.settings_widget.load_settings(settings)
+            self.apply_settings(settings)
             
             self.log.info(f"설정이 로드되었습니다: {filename}")
             QMessageBox.information(self, "알림", "설정이 로드되었습니다.")
@@ -1468,9 +1602,6 @@ class MainWindow(QMainWindow):
     
     def reset_settings(self):
         """설정 초기화"""
-        if not hasattr(self, 'settings_widget'):
-            return
-            
         # 확인 대화상자 표시
         reply = QMessageBox.question(
             self, 
@@ -1481,8 +1612,12 @@ class MainWindow(QMainWindow):
         )
         
         if reply == QMessageBox.Yes:
-            # 설정 초기화
-            self.settings_widget.reset_settings()
+            # 작업 설정 초기화
+            self.monitor_widget.min_interval.setValue(5)
+            self.monitor_widget.max_interval.setValue(15)
+            self.monitor_widget.repeat_checkbox.setChecked(True)
+            self.monitor_widget.ip_tethering_checkbox.setChecked(False)
+            self.monitor_widget.api_key_input.clear()
             
             self.log.info("설정이 초기화되었습니다.")
             QMessageBox.information(self, "알림", "설정이 초기화되었습니다.")
@@ -1511,32 +1646,52 @@ class MainWindow(QMainWindow):
             removed_task = self.tasks[task_to_remove]
             account_id = removed_task['account_id']
             
-            # 설정 정보 가져오기
-            settings = removed_task.get('settings', {})
-            keywords_str = ', '.join(settings.get('search_keywords', [])[:3])
-            if len(settings.get('search_keywords', [])) > 3:
-                keywords_str += "..."
+            # 작업 삭제
+            self.tasks.pop(task_to_remove)
             
-            # 삭제 확인 대화상자
-            reply = QMessageBox.question(
-                self,
-                '작업 삭제 확인',
-                f'다음 작업을 삭제하시겠습니까?\n\n'
-                f'• 작업 #{task_id}\n'
-                f'• 계정: {account_id}\n'
-                f'• 키워드: {keywords_str}\n',
-                QMessageBox.Yes | QMessageBox.No,
-                QMessageBox.No
-            )
+            # 작업 목록 업데이트
+            self.update_task_list()
             
-            if reply == QMessageBox.Yes:
-                # 작업 삭제
-                self.tasks.pop(task_to_remove)
+            # 로그 메시지
+            msg = f'작업 #{task_id} 삭제됨: 계정 {account_id}'
+            self.log.info(msg)
+            self.monitor_widget.add_log_message({'message': msg, 'color': 'blue'})
+
+    def validate_api_key(self):
+        """API 키 검증"""
+        api_key = self.api_key_input.text().strip()
+        
+        if not api_key:
+            QMessageBox.warning(self, "API 키 검증", "API 키를 입력해주세요.")
+            return
+        
+        # 검증 중 UI 업데이트
+        self.validate_api_btn.setEnabled(False)
+        self.api_key_status.setText("검증 중...")
+        self.api_key_status.setStyleSheet("color: #5c85d6;")
+        
+        try:
+            ai_generator = AIGenerator(api_key=api_key)
+            is_valid, message = ai_generator.validate_api_key()
+            
+            if is_valid:
+                self.api_key_status.setText("✓ 유효한 키")
+                self.api_key_status.setStyleSheet("color: #4CAF50;")
+                self.log.info("API 키 검증 성공: " + message)
                 
-                # 작업 목록 업데이트
-                self.update_task_list()
-                
-                # 로그 메시지
-                msg = f'작업 #{task_id} 삭제됨: 계정 {account_id}, 키워드 [{keywords_str}]'
-                self.log.info(msg)
-                self.monitor_widget.add_log_message({'message': msg, 'color': 'blue'})
+                # API 키 설정
+                self.set_ai_api_key(api_key)
+            else:
+                self.api_key_status.setText("✗ 유효하지 않음")
+                self.api_key_status.setStyleSheet("color: #d65c5c;")
+                self.log.error("API 키 검증 실패: " + message)
+                QMessageBox.warning(self, "API 키 검증 실패", message)
+        except Exception as e:
+            self.api_key_status.setText("✗ 오류 발생")
+            self.api_key_status.setStyleSheet("color: #d65c5c;")
+            error_msg = f"API 키 검증 중 오류 발생: {str(e)}"
+            self.log.error(error_msg)
+            QMessageBox.critical(self, "API 키 검증 오류", error_msg)
+        
+        # 검증 완료 후 UI 업데이트
+        self.validate_api_btn.setEnabled(True)

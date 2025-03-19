@@ -1,5 +1,6 @@
 from main.utils.openai_utils import OpenAIGenerator
 import os
+import openai
 
 class AIGenerator:
     def __init__(self, api_key=None):
@@ -12,13 +13,34 @@ class AIGenerator:
         self.generator = OpenAIGenerator(api_key=self.api_key)
     
     def validate_api_key(self):
-        """API 키가 유효한지 확인합니다.
+        """API 키 유효성 검사
         
         Returns:
-            tuple: (성공 여부(bool), 메시지(str))
+            tuple: (is_valid, message)
+                - is_valid (bool): API 키 유효 여부
+                - message (str): 결과 메시지
         """
+        if not self.api_key:
+            return False, "API 키가 입력되지 않았습니다."
+            
         try:
-            return self.generator.validate_api_key()
+            # OpenAI 클라이언트 설정
+            openai.api_key = self.api_key
+            
+            # API 키 검증을 위한 간단한 요청
+            response = openai.chat.completions.create(
+                model="gpt-3.5-turbo",
+                messages=[{"role": "user", "content": "test"}],
+                max_tokens=5
+            )
+            
+            # 응답이 성공적으로 왔다면 API 키가 유효한 것
+            return True, "API 키가 유효합니다."
+            
+        except openai.AuthenticationError:
+            return False, "유효하지 않은 API 키입니다."
+        except openai.RateLimitError:
+            return False, "API 사용량이 한도를 초과했습니다."
         except Exception as e:
             return False, f"API 키 검증 중 오류 발생: {str(e)}"
     

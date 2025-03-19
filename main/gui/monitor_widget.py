@@ -1,7 +1,6 @@
 from PyQt5.QtWidgets import (QWidget, QLabel, QTableWidget, QVBoxLayout, 
                            QTableWidgetItem, QGroupBox, QHeaderView)
-from PyQt5.QtCore import pyqtSlot, QVariant
-from PyQt5.QtCore import QUrl
+from PyQt5.QtCore import pyqtSlot, QVariant, QUrl, Qt
 from PyQt5.QtGui import QDesktopServices
 from ..utils.log import Log
 from .styles import DARK_STYLE
@@ -11,22 +10,27 @@ class BaseMonitorWidget(QWidget):
         super().__init__()
         self.log = log
         
-        # task_monitor 초기화
-        self.task_monitor = QTableWidget(0, 4)  # 4개의 컬럼 (시간, 아이디, 내용, URL)
-        self.task_monitor.setHorizontalHeaderLabels(["시간", "아이디", "내용", "URL"])
+        # task_monitor 초기화 (상단 모니터)
+        self.task_monitor = QTableWidget(0, 4)  # 4개의 컬럼 (NO, 아이디, 내용, URL)
+        self.task_monitor.setHorizontalHeaderLabels(["NO", "제목", "내용", "URL"])
         
         # URL 클릭 이벤트 연결
         self.task_monitor.itemClicked.connect(self.on_item_clicked)
         
         # 컬럼 너비 설정
         header = self.task_monitor.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.Fixed)  # 시간
-        header.setSectionResizeMode(1, QHeaderView.Fixed)  # 아이디
+        header.setSectionResizeMode(0, QHeaderView.Fixed)  # NO
+        header.setSectionResizeMode(1, QHeaderView.Stretch)  # 제목
         header.setSectionResizeMode(2, QHeaderView.Stretch)  # 내용
         header.setSectionResizeMode(3, QHeaderView.Fixed)  # URL
         
-        self.task_monitor.setColumnWidth(0, 170)  # 시간 (2025-02-27 12:31:15 포맷이 다 보이도록)
-        self.task_monitor.setColumnWidth(1, 80)  # 아이디
+        self.task_monitor.setColumnWidth(0, 50)  # NO
+        self.task_monitor.setColumnWidth(1, 150)  # 제목
+        self.task_monitor.setColumnWidth(2, 150)  # 내용
+        self.task_monitor.setColumnWidth(3, 150)  # URL
+        
+        # 가로 스크롤바 숨기기
+        self.task_monitor.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         
         # 테이블 스타일 설정
         self.task_monitor.setStyleSheet("""
@@ -60,7 +64,7 @@ class BaseMonitorWidget(QWidget):
         # 여백 제거
         self.task_monitor.setContentsMargins(0, 0, 0, 0)
         
-        # log_monitor 초기화
+        # log_monitor 초기화 (하단 모니터)
         self.log_monitor = QTableWidget(0, 2)  # 2개의 컬럼 (시간, 메시지)
         self.log_monitor.setHorizontalHeaderLabels(["시간", "메시지"])
         
@@ -68,7 +72,10 @@ class BaseMonitorWidget(QWidget):
         log_header = self.log_monitor.horizontalHeader()
         log_header.setSectionResizeMode(0, QHeaderView.Fixed)  # 시간
         log_header.setSectionResizeMode(1, QHeaderView.Stretch)  # 메시지
-        self.log_monitor.setColumnWidth(0, 180)  # 시간
+        self.log_monitor.setColumnWidth(0, 180)  # 시간 컬럼 너비 조정
+        
+        # 가로 스크롤바 숨기기
+        self.log_monitor.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
 
     def on_item_clicked(self, item):
         """테이블 아이템 클릭 이벤트 처리"""
@@ -93,7 +100,7 @@ class BaseMonitorWidget(QWidget):
         self.task_monitor.insertRow(current_row)
         
         # 데이터 설정
-        self.task_monitor.setItem(current_row, 0, QTableWidgetItem(data['timestamp']))
+        self.task_monitor.setItem(current_row, 0, QTableWidgetItem(str(current_row + 1)))  # NO
         self.task_monitor.setItem(current_row, 1, QTableWidgetItem(data['account_id']))
         self.task_monitor.setItem(current_row, 2, QTableWidgetItem(data['content']))
         self.task_monitor.setItem(current_row, 3, QTableWidgetItem(data['url']))
@@ -172,31 +179,37 @@ class RoutineMonitorWidget(BaseMonitorWidget):
         # 게시글 모니터 테이블 (task_monitor)
         self.task_monitor = QTableWidget(0, 4)
         self.task_monitor.setHorizontalHeaderLabels(
-            ["시간", "아이디", "내용", "URL"]
+            ["NO", "아이디", "내용", "URL"]
         )
         
         # 테이블 헤더 설정
         task_header = self.task_monitor.horizontalHeader()
-        task_header.setSectionResizeMode(0, QHeaderView.Fixed)  # 시간
+        task_header.setSectionResizeMode(0, QHeaderView.Fixed)  # NO
         task_header.setSectionResizeMode(1, QHeaderView.Fixed)  # 아이디
         task_header.setSectionResizeMode(2, QHeaderView.Stretch)  # 내용
         task_header.setSectionResizeMode(3, QHeaderView.Fixed)  # URL
         
-        self.task_monitor.setColumnWidth(0, 180)  # 시간 (2025-02-27 12:31:15 포맷이 다 보이도록)
+        self.task_monitor.setColumnWidth(0, 50)  # NO
         self.task_monitor.setColumnWidth(1, 100)  # 아이디
-        self.task_monitor.setColumnWidth(3, 200)  # URL
+        self.task_monitor.setColumnWidth(3, 150)  # URL
+        
+        # 가로 스크롤바 숨기기
+        self.task_monitor.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         
         # 작업로그 모니터
         self.log_monitor = QTableWidget(0, 2)
         self.log_monitor.setHorizontalHeaderLabels(
-            ["Timestamp", "Log Message"]
+            ["NO", "메시지"]
         )
 
         # 컬럼 너비 설정
         log_header = self.log_monitor.horizontalHeader()
-        log_header.setSectionResizeMode(0, QHeaderView.Fixed)  # Timestamp
-        log_header.setSectionResizeMode(1, QHeaderView.Stretch)  # Log Message
-        self.log_monitor.setColumnWidth(0, 180)  # Timestamp
+        log_header.setSectionResizeMode(0, QHeaderView.Fixed)  # NO
+        log_header.setSectionResizeMode(1, QHeaderView.Stretch)  # 메시지
+        self.log_monitor.setColumnWidth(0, 50)  # NO
+        
+        # 가로 스크롤바 숨기기
+        self.log_monitor.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         
         group_box = QGroupBox()
         layout = QVBoxLayout()

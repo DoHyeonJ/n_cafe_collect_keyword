@@ -1,18 +1,16 @@
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, 
                            QPushButton, QGroupBox, QLabel, 
-                           QListWidget, QSpinBox, QLineEdit, QTableWidget, QHeaderView, QTableWidgetItem, QTabWidget, QCheckBox, QTextEdit, QMessageBox)
+                           QListWidget, QSpinBox, QLineEdit, QTableWidget, QHeaderView, QTableWidgetItem, QTabWidget, QCheckBox, QTextEdit, QMessageBox, QFileDialog)
 from .monitor_widget import RoutineMonitorWidget, BaseMonitorWidget
 from .styles import DARK_STYLE
 from datetime import datetime
 from PyQt5.QtCore import Qt, pyqtSignal
-from main.api.ai_generator import AIGenerator
-from main.api.ip_manage import change_ip, get_current_ip, is_tethering_enabled, toggle_usb_tethering
+from ..api.ai_generator import AIGenerator
+from ..api.ip_manage import change_ip, get_current_ip, is_tethering_enabled, toggle_usb_tethering
 from ..utils.log import Log
+import pandas as pd
 
 class RoutineTab(BaseMonitorWidget):
-    add_task_clicked = pyqtSignal()  # 작업 추가 시그널
-    remove_task_clicked = pyqtSignal()  # 작업 삭제 시그널
-    remove_all_clicked = pyqtSignal()  # 전체 삭제 시그널
     execute_tasks_clicked = pyqtSignal(bool)  # 작업 실행/정지 시그널, 실행 상태를 전달
     
     def __init__(self, log: Log):
@@ -27,8 +25,8 @@ class RoutineTab(BaseMonitorWidget):
         layout = QVBoxLayout()
         
         # 다음 작업 정보 표시 영역 추가
-        next_task_info = QGroupBox("다음 작업 정보")
-        next_task_layout = QHBoxLayout()
+        # next_task_info = QGroupBox("다음 작업 정보")
+        # next_task_layout = QHBoxLayout()
         
         self.next_task_label = QLabel("대기 중...")
         self.next_task_label.setStyleSheet("""
@@ -42,8 +40,8 @@ class RoutineTab(BaseMonitorWidget):
             }
         """)
         
-        next_task_layout.addWidget(self.next_task_label)
-        next_task_info.setLayout(next_task_layout)
+        # next_task_layout.addWidget(self.next_task_label)
+        # next_task_info.setLayout(next_task_layout)
         
         # 탭 위젯 (상단)
         tab_widget = QTabWidget()
@@ -70,345 +68,56 @@ class RoutineTab(BaseMonitorWidget):
             }
         """)
         
-        # 1. 작업 관리 탭 (작업 목록 + 작업 설정)
-        task_manage_tab = QWidget()
-        task_layout = QVBoxLayout()
-        task_layout.setSpacing(10)
-        
-        # 작업 목록과 버튼
-        task_list_container = QWidget()
-        task_list_layout = QVBoxLayout(task_list_container)
-        task_list_layout.setContentsMargins(0, 0, 0, 0)
-        task_list_layout.setSpacing(5)
-        
-        # 작업 목록
-        self.task_list = QListWidget()
-        self.task_list.setDragDropMode(QListWidget.InternalMove)
-        self.task_list.setSelectionMode(QListWidget.ExtendedSelection)
-        self.task_list.setStyleSheet("""
-            QListWidget {
-                background-color: #2b2b2b;
-                border: 1px solid #3d3d3d;
-                border-radius: 6px;
-                padding: 5px;
-            }
-            QListWidget::item {
-                background-color: #353535;
-                border-radius: 6px;
-                margin: 2px;
-                min-height: 50px;  /* 아이템 높이 더 축소 */
-            }
-            QListWidget::item:selected {
-                background-color: #404040;
-                border: 1px solid #5c85d6;
-            }
-            QListWidget::item:hover:!selected {
-                background-color: #383838;
-                border: 1px solid #4a4a4a;
-            }
-            QListWidget::item:drag {
-                background-color: #2b2b2b;
-                border: 1px solid #5c85d6;
-                opacity: 0.8;
-            }
-        """)
-        
-        # 작업 순서 변경 시그널 연결
-        self.task_list.model().rowsMoved.connect(self.on_tasks_reordered)
-        
-        # 작업 개수 표시 레이블
-        self.task_count_label = QLabel("총 0개의 작업")
-        self.task_count_label.setStyleSheet("""
-            color: #808080;
-            font-size: 12px;
-            padding: 5px;
-            border-top: 1px solid #3d3d3d;
-        """)
-        self.task_count_label.setAlignment(Qt.AlignRight)
-        
-        task_list_layout.addWidget(self.task_list)
-        task_list_layout.addWidget(self.task_count_label)
-        
-        # 작업 추가/삭제 버튼
-        btn_layout = QHBoxLayout()
-        btn_layout.setSpacing(10)  # 버튼 간격 증가
-        
-        # 버튼 기본 스타일에 크기 관련 설정 추가
-        btn_base_style = """
-            QPushButton {
-                min-width: 120px;  /* 버튼 최소 너비 */
-                padding: 10px 20px;  /* 패딩 증가 */
-                font-size: 13px;  /* 폰트 크기 증가 */
-            }
-        """
-        
-        # 각 버튼 스타일 업데이트
-        add_btn_style = btn_base_style + """
-            QPushButton {
-                background-color: #5c85d6;
-                color: white;
-                border: none;
-                border-radius: 4px;
-            }
-            QPushButton:hover {
-                background-color: #4a6fb8;
-            }
-        """
-        
-        remove_btn_style = btn_base_style + """
-            QPushButton {
-                background-color: #d65c5c;
-                color: white;
-                border: none;
-                border-radius: 4px;
-            }
-            QPushButton:hover {
-                background-color: #b84a4a;
-            }
-        """
-        
-        remove_all_btn_style = btn_base_style + """
-            QPushButton {
-                background-color: #8B0000;
-                color: white;
-                border: none;
-                border-radius: 4px;
-            }
-            QPushButton:hover {
-                background-color: #A00000;
-            }
-        """
-        
-        self.add_task_btn = QPushButton("작업 추가")
-        self.remove_task_btn = QPushButton("작업 삭제")
-        self.remove_all_btn = QPushButton("전체 삭제")  # 전체 삭제 버튼 추가
-        self.remove_task_btn.setEnabled(True)
-        self.remove_all_btn.setEnabled(True)
-        
-        self.add_task_btn.setStyleSheet(add_btn_style)
-        self.remove_task_btn.setStyleSheet(remove_btn_style)
-        self.remove_all_btn.setStyleSheet(remove_all_btn_style)
-        
-        # 버튼 클릭 이벤트 연결
-        self.add_task_btn.clicked.connect(self.add_task_clicked.emit)
-        self.remove_task_btn.clicked.connect(self.remove_task_clicked.emit)
-        self.remove_all_btn.clicked.connect(self.remove_all_clicked.emit)  # 시그널 연결
-        
-        # 작업 선택 시 삭제 버튼 활성화/비활성화
-        self.task_list.itemSelectionChanged.connect(self.on_task_selection_changed)
-        
-        btn_layout.addWidget(self.add_task_btn, stretch=1)
-        btn_layout.addWidget(self.remove_task_btn, stretch=1)
-        btn_layout.addWidget(self.remove_all_btn, stretch=1)
-        
-        # 작업 관리 탭에 추가
-        task_layout.addWidget(task_list_container)
-        task_layout.addLayout(btn_layout)
-        task_manage_tab.setLayout(task_layout)
-        
-        # 작업 설정 영역
-        settings_group = QGroupBox("작업 설정")
-        settings_layout = QVBoxLayout()
-        settings_layout.setSpacing(10)
-        
-        # 실행 설정 컨테이너 (간격 + 반복)
-        execution_container = QWidget()
-        execution_layout = QHBoxLayout(execution_container)
-        execution_layout.setContentsMargins(0, 0, 0, 0)
-        
-        # 실행 간격 설정
-        interval_group = QWidget()
-        interval_layout = QHBoxLayout(interval_group)
-        interval_layout.setContentsMargins(0, 0, 0, 0)
-        interval_layout.setSpacing(8)
-        
-        min_interval_label = QLabel("최소 (분):")
-        min_interval_label.setStyleSheet("color: white;")
-        self.min_interval = QSpinBox()
-        self.min_interval.setRange(1, 1440)
-        self.min_interval.setValue(5)
-        self.min_interval.setStyleSheet("""
-            QSpinBox {
-                background-color: #2b2b2b;
-                color: white;
-                border: 1px solid #3d3d3d;
-                padding: 5px;
-                border-radius: 4px;
-            }
-        """)
-        
-        max_interval_label = QLabel("최대 (분):")
-        max_interval_label.setStyleSheet("color: white;")
-        self.max_interval = QSpinBox()
-        self.max_interval.setRange(1, 1440)
-        self.max_interval.setValue(15)
-        self.max_interval.setStyleSheet(self.min_interval.styleSheet())
-        
-        # 반복 설정
-        self.repeat_checkbox = QCheckBox("작업 반복")
-        self.repeat_checkbox.setStyleSheet("""
-            QCheckBox {
-                color: white;
-                spacing: 5px;
-                padding: 5px;
-            }
-            QCheckBox::indicator {
-                width: 16px;
-                height: 16px;
-            }
-            QCheckBox::indicator:unchecked {
-                border: 2px solid #5c85d6;
-                background: transparent;
-                border-radius: 3px;
-            }
-            QCheckBox::indicator:checked {
-                border: 2px solid #5c85d6;
-                background: #5c85d6;
-                border-radius: 3px;
-            }
-        """)
-        
-        interval_layout.addWidget(min_interval_label)
-        interval_layout.addWidget(self.min_interval)
-        interval_layout.addWidget(max_interval_label)
-        interval_layout.addWidget(self.max_interval)
-        interval_layout.addSpacing(20)  # 간격 추가
-        interval_layout.addWidget(self.repeat_checkbox)
-        interval_layout.addStretch()
-
-        # IP 테더링 설정 추가
-        ip_tethering_group = QWidget()
-        ip_tethering_layout = QVBoxLayout(ip_tethering_group)
-        ip_tethering_layout.setContentsMargins(0, 0, 0, 0)
-        ip_tethering_layout.setSpacing(8)
-        
-        # IP 테더링 체크박스
-        self.ip_tethering_checkbox = QCheckBox("IP 테더링 사용")
-        self.ip_tethering_checkbox.setStyleSheet(self.repeat_checkbox.styleSheet())
-        self.ip_tethering_checkbox.toggled.connect(self.on_ip_tethering_toggled)
-        
-        # IP 테더링 상태 컨테이너
-        ip_status_container = QWidget()
-        ip_status_layout = QHBoxLayout(ip_status_container)
-        ip_status_layout.setContentsMargins(0, 0, 0, 0)
-        ip_status_layout.setSpacing(8)
-        
-        # 현재 IP 표시 레이블
-        ip_label = QLabel("현재 IP:")
-        ip_label.setStyleSheet("color: white;")
-        self.current_ip_label = QLabel("확인 중...")
-        self.current_ip_label.setStyleSheet("""
-            QLabel {
-                color: #5c85d6;
-                background-color: #2b2b2b;
-                border: 1px solid #3d3d3d;
-                padding: 5px;
-                border-radius: 4px;
-            }
-        """)
-        
-        # IP 검증 버튼
-        self.validate_ip_btn = QPushButton("IP 변경 검증")
-        self.validate_ip_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #5c85d6;
-                color: white;
-                border: none;
-                border-radius: 4px;
-                padding: 5px 10px;
-            }
-            QPushButton:hover {
-                background-color: #4a6fb8;
-            }
-            QPushButton:disabled {
-                background-color: #555555;
-                color: #aaaaaa;
-            }
-        """)
-        self.validate_ip_btn.clicked.connect(self.validate_ip_change)
-        self.validate_ip_btn.setEnabled(False)  # 초기에는 비활성화
-        
-        # IP 검증 상태 표시 레이블
-        self.ip_status = QLabel("")
-        self.ip_status.setStyleSheet("color: #808080; margin-left: 5px;")
-        
-        ip_status_layout.addWidget(ip_label)
-        ip_status_layout.addWidget(self.current_ip_label, stretch=1)
-        ip_status_layout.addWidget(self.validate_ip_btn)
-        ip_status_layout.addWidget(self.ip_status)
-        
-        ip_tethering_layout.addWidget(self.ip_tethering_checkbox)
-        ip_tethering_layout.addWidget(ip_status_container)
-        
-        # IP 상태 컨테이너 초기에 숨기기
-        ip_status_container.setVisible(False)
-        self.ip_status_container = ip_status_container  # 참조 저장
-
-        # API Key 설정
-        api_group = QWidget()
-        api_layout = QHBoxLayout(api_group)
-        api_layout.setContentsMargins(0, 0, 0, 0)
-        
-        api_label = QLabel("AI API Key:")
-        api_label.setStyleSheet("color: white;")
-        self.api_key_input = QLineEdit()
-        self.api_key_input.setPlaceholderText("API Key를 입력하세요")
-        self.api_key_input.setStyleSheet("""
-            QLineEdit {
-                background-color: #2b2b2b;
-                color: white;
-                border: 1px solid #3d3d3d;
-                padding: 5px;
-                border-radius: 4px;
-            }
-        """)
-        # API 키 입력값 변경 이벤트 연결
-        self.api_key_input.textChanged.connect(self.on_api_key_changed)
-        
-        # API 키 검증 버튼 추가
-        self.validate_api_btn = QPushButton("검증")
-        self.validate_api_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #5c85d6;
-                color: white;
-                border: none;
-                border-radius: 4px;
-                padding: 5px 10px;
-            }
-            QPushButton:hover {
-                background-color: #4a6fb8;
-            }
-            QPushButton:disabled {
-                background-color: #555555;
-                color: #aaaaaa;
-            }
-        """)
-        self.validate_api_btn.clicked.connect(self.validate_api_key)
-        
-        # API 키 검증 상태 표시 레이블
-        self.api_key_status = QLabel("")
-        self.api_key_status.setStyleSheet("color: #808080; margin-left: 5px;")
-        
-        api_layout.addWidget(api_label)
-        api_layout.addWidget(self.api_key_input, stretch=1)
-        api_layout.addWidget(self.validate_api_btn)
-        api_layout.addWidget(self.api_key_status)
-
-        # 설정 영역에 위젯 추가
-        settings_layout.addWidget(interval_group)
-        settings_layout.addWidget(ip_tethering_group)  # IP 테더링 설정 추가
-        settings_layout.addWidget(api_group)
-        settings_group.setLayout(settings_layout)
-        
-        # 작업 관리 탭에 추가
-        task_layout.addWidget(settings_group)
-        task_manage_tab.setLayout(task_layout)
-        
         # 2. 게시글 모니터 탭
         post_monitor_tab = QWidget()
         post_layout = QVBoxLayout()
         
-        # BaseMonitorWidget에서 상속받은 task_monitor 직접 사용
+        # 버튼 컨테이너 추가
+        button_container = QWidget()
+        button_layout = QHBoxLayout()
+        button_layout.setContentsMargins(0, 0, 0, 10)  # 아래쪽 여백만 추가
+        
+        # 엑셀 다운로드 버튼
+        self.excel_btn = QPushButton("엑셀 다운로드")
+        self.excel_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #5c85d6;
+                color: white;
+                border: none;
+                padding: 8px 15px;
+                border-radius: 4px;
+                min-width: 100px;
+            }
+            QPushButton:hover {
+                background-color: #4a6fb8;
+            }
+        """)
+        self.excel_btn.clicked.connect(self.export_to_excel)
+        
+        # 수집 초기화 버튼
+        self.clear_btn = QPushButton("수집 초기화")
+        self.clear_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #d65c5c;
+                color: white;
+                border: none;
+                padding: 8px 15px;
+                border-radius: 4px;
+                min-width: 100px;
+            }
+            QPushButton:hover {
+                background-color: #b84a4a;
+            }
+        """)
+        self.clear_btn.clicked.connect(self.clear_monitor)
+        
+        button_layout.addWidget(self.excel_btn)
+        button_layout.addStretch()  # 중간 공간을 채우기 위한 stretch
+        button_layout.addWidget(self.clear_btn)
+        button_container.setLayout(button_layout)
+        
+        # 레이아웃에 버튼 컨테이너와 모니터 추가
+        post_layout.addWidget(button_container)
         post_layout.addWidget(self.task_monitor)
         post_monitor_tab.setLayout(post_layout)
         
@@ -445,7 +154,6 @@ class RoutineTab(BaseMonitorWidget):
         support_tab.setLayout(support_layout)
         
         # 탭 추가
-        tab_widget.addTab(task_manage_tab, "작업 관리")
         tab_widget.addTab(post_monitor_tab, "작업 모니터")
         tab_widget.addTab(notice_tab, "공지사항")
         tab_widget.addTab(support_tab, "기간연장/문의")
@@ -501,7 +209,7 @@ class RoutineTab(BaseMonitorWidget):
         
         # 메인 레이아웃 구성
         layout.addWidget(tab_widget)
-        layout.addWidget(next_task_info)
+        #layout.addWidget(next_task_info)
         layout.addWidget(self.log_monitor)
         layout.addWidget(self.execute_btn)
         self.setLayout(layout)
@@ -654,7 +362,6 @@ class RoutineTab(BaseMonitorWidget):
 
     def add_log_message(self, log_entry):
         """로그 메시지 추가 - RoutineMonitorWidget에 위임"""
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         message = log_entry.get('message', '')
         color = log_entry.get('color', 'black')
         
@@ -663,7 +370,8 @@ class RoutineTab(BaseMonitorWidget):
         self.log_monitor.insertRow(row)
         
         # 시간 아이템 생성
-        time_item = QTableWidgetItem(timestamp)
+        current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        time_item = QTableWidgetItem(current_time)
         time_item.setForeground(Qt.gray)
         
         # 메시지 아이템 생성
@@ -683,84 +391,6 @@ class RoutineTab(BaseMonitorWidget):
         
         # 새로 추가된 행으로 스크롤
         self.log_monitor.scrollToBottom()
-
-    def on_task_selection_changed(self):
-        """작업 선택 상태에 따라 삭제 버튼 활성화/비활성화"""
-        self.remove_task_btn.setEnabled(bool(self.task_list.selectedItems()))
-
-    def on_tasks_reordered(self):
-        """작업 순서가 변경되었을 때 처리"""
-        # 이 메서드는 작업 목록의 모델이 변경될 때 호출됩니다.
-        # 여기에 필요한 처리를 추가할 수 있습니다.
-        pass
-
-    def on_api_key_changed(self):
-        """API 키 입력값이 변경되었을 때 호출되는 메서드"""
-        api_key = self.api_key_input.text().strip()
-        
-        # API 키가 변경되면 검증 상태 초기화
-        self.api_key_validated = False
-        self.api_key_status.setText("")
-        
-        # 메인 윈도우에 API 키 설정
-        if self.main_window and hasattr(self.main_window, 'set_ai_api_key'):
-            self.main_window.set_ai_api_key(api_key)
-        else:
-            # 기존 방식으로 시도 (하위 호환성 유지)
-            if hasattr(self.parent(), 'set_ai_api_key'):
-                self.parent().set_ai_api_key(api_key)
-            elif hasattr(self.parent().parent(), 'set_ai_api_key'):
-                self.parent().parent().set_ai_api_key(api_key)
-        
-        # 검증 버튼 활성화/비활성화
-        self.validate_api_btn.setEnabled(bool(api_key))
-        
-        # 로그 메시지 추가
-        self.log.info("API 키가 변경되었습니다.")
-
-    def validate_api_key(self):
-        """API 키 검증 버튼 클릭 시 호출되는 메서드"""
-        api_key = self.api_key_input.text().strip()
-        
-        if not api_key:
-            QMessageBox.warning(self, "API 키 검증", "API 키를 입력해주세요.")
-            return
-        
-        # 검증 중 UI 업데이트
-        self.validate_api_btn.setEnabled(False)
-        self.api_key_status.setText("검증 중...")
-        self.api_key_status.setStyleSheet("color: #5c85d6;")
-        
-        # API 키 검증
-        try:
-            ai_generator = AIGenerator(api_key=api_key)
-            is_valid, message = ai_generator.validate_api_key()
-            
-            if is_valid:
-                self.api_key_validated = True
-                self.api_key_status.setText("✓ 유효한 키")
-                self.api_key_status.setStyleSheet("color: #4CAF50;")
-                self.log.info("API 키 검증 성공: " + message)
-                
-                # 메인 윈도우에 API 키 설정
-                if self.main_window and hasattr(self.main_window, 'set_ai_api_key'):
-                    self.main_window.set_ai_api_key(api_key)
-            else:
-                self.api_key_validated = False
-                self.api_key_status.setText("✗ 유효하지 않음")
-                self.api_key_status.setStyleSheet("color: #d65c5c;")
-                self.log.error("API 키 검증 실패: " + message)
-                QMessageBox.warning(self, "API 키 검증 실패", message)
-        except Exception as e:
-            self.api_key_validated = False
-            self.api_key_status.setText("✗ 오류 발생")
-            self.api_key_status.setStyleSheet("color: #d65c5c;")
-            error_msg = f"API 키 검증 중 오류 발생: {str(e)}"
-            self.log.error(error_msg)
-            QMessageBox.critical(self, "API 키 검증 오류", error_msg)
-        
-        # 검증 완료 후 UI 업데이트
-        self.validate_api_btn.setEnabled(True)
 
     def update_next_task_info(self, info):
         """다음 작업 정보 업데이트
@@ -975,4 +605,114 @@ class RoutineTab(BaseMonitorWidget):
             QMessageBox.critical(self, "IP 변경 오류", error_msg)
         
         # 검증 완료 후 UI 업데이트
-        self.validate_ip_btn.setEnabled(True) 
+        self.validate_ip_btn.setEnabled(True)
+
+    def validate_api_key(self):
+        """API 키 검증 버튼 클릭 시 호출되는 메서드"""
+        api_key = self.api_key_input.text().strip()
+        
+        if not api_key:
+            QMessageBox.warning(self, "API 키 검증", "API 키를 입력해주세요.")
+            return
+        
+        # 검증 중 UI 업데이트
+        self.validate_api_btn.setEnabled(False)
+        self.api_key_status.setText("검증 중...")
+        self.api_key_status.setStyleSheet("color: #5c85d6;")
+        
+        # API 키 검증
+        try:
+            ai_generator = AIGenerator(api_key=api_key)
+            is_valid, message = ai_generator.validate_api_key()
+            
+            if is_valid:
+                self.api_key_validated = True
+                self.api_key_status.setText("✓ 유효한 키")
+                self.api_key_status.setStyleSheet("color: #4CAF50;")
+                self.log.info("API 키 검증 성공: " + message)
+                
+                # 메인 윈도우에 API 키 설정
+                if self.main_window and hasattr(self.main_window, 'set_ai_api_key'):
+                    self.main_window.set_ai_api_key(api_key)
+            else:
+                self.api_key_validated = False
+                self.api_key_status.setText("✗ 유효하지 않음")
+                self.api_key_status.setStyleSheet("color: #d65c5c;")
+                self.log.error("API 키 검증 실패: " + message)
+                QMessageBox.warning(self, "API 키 검증 실패", message)
+        except Exception as e:
+            self.api_key_validated = False
+            self.api_key_status.setText("✗ 오류 발생")
+            self.api_key_status.setStyleSheet("color: #d65c5c;")
+            error_msg = f"API 키 검증 중 오류 발생: {str(e)}"
+            self.log.error(error_msg)
+            QMessageBox.critical(self, "API 키 검증 오류", error_msg)
+        
+        # 검증 완료 후 UI 업데이트
+        self.validate_api_btn.setEnabled(True) 
+
+    def export_to_excel(self):
+        """작업 모니터 데이터를 엑셀 파일로 내보내기"""
+        # 사용자 확인
+        reply = QMessageBox.question(
+            self,
+            '엑셀 다운로드',
+            '현재 수집된 데이터를 엑셀 파일로 다운로드하시겠습니까?',
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+        
+        if reply == QMessageBox.No:
+            return
+            
+        try:
+            # 데이터 수집
+            data = []
+            for row in range(self.task_monitor.rowCount()):
+                row_data = []
+                for col in range(self.task_monitor.columnCount()):
+                    item = self.task_monitor.item(row, col)
+                    row_data.append(item.text() if item else '')
+                data.append(row_data)
+            
+            # DataFrame 생성
+            df = pd.DataFrame(data, columns=['NO', '아이디', '내용', 'URL'])
+            
+            # 파일 저장 대화상자
+            default_filename = f'작업_모니터_{datetime.now().strftime("%Y%m%d_%H%M%S")}.xlsx'
+            filename, _ = QFileDialog.getSaveFileName(
+                self,
+                "엑셀 파일 저장",
+                default_filename,
+                "Excel Files (*.xlsx)"
+            )
+            
+            if filename:
+                # 엑셀 파일로 저장
+                df.to_excel(filename, index=False, engine='openpyxl')
+                self.log.info(f'엑셀 파일이 저장되었습니다: {filename}')
+                QMessageBox.information(self, '저장 완료', '엑셀 파일이 성공적으로 저장되었습니다.')
+        except Exception as e:
+            self.log.error(f'엑셀 파일 저장 중 오류 발생: {str(e)}')
+            QMessageBox.critical(self, '오류', f'엑셀 파일 저장 중 오류가 발생했습니다:\n{str(e)}')
+
+    def clear_monitor(self):
+        """작업 모니터 데이터 초기화"""
+        # 사용자 확인
+        reply = QMessageBox.question(
+            self,
+            '수집 초기화',
+            '현재 수집된 모든 데이터가 삭제됩니다.\n계속하시겠습니까?',
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+        
+        if reply == QMessageBox.Yes:
+            try:
+                # 테이블 초기화
+                self.task_monitor.setRowCount(0)
+                self.log.info('작업 모니터가 초기화되었습니다.')
+                QMessageBox.information(self, '초기화 완료', '작업 모니터가 초기화되었습니다.')
+            except Exception as e:
+                self.log.error(f'작업 모니터 초기화 중 오류 발생: {str(e)}')
+                QMessageBox.critical(self, '오류', f'작업 모니터 초기화 중 오류가 발생했습니다:\n{str(e)}') 
