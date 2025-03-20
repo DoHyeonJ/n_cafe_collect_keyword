@@ -4,13 +4,13 @@ import shutil
 from datetime import datetime
 
 class TaskManager:
-    """작업 설정 관리 클래스"""
+    """설정 관리 클래스"""
     
     def __init__(self, base_dir="tasks"):
         """초기화
         
         Args:
-            base_dir (str): 작업 설정 저장 기본 디렉토리
+            base_dir (str): 설정 저장 기본 디렉토리
         """
         self.base_dir = base_dir
         
@@ -19,10 +19,10 @@ class TaskManager:
             os.makedirs(self.base_dir)
     
     def save_task_settings(self, task_settings, filename):
-        """작업 설정 저장
+        """설정 저장
         
         Args:
-            task_settings (dict): 저장할 작업 설정
+            task_settings (dict): 저장할 설정
             filename (str): 저장할 파일 이름 (확장자 제외)
             
         Returns:
@@ -35,23 +35,49 @@ class TaskManager:
             # 저장 시간 추가
             task_settings['saved_at'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             
+            # 한글 인코딩 처리
+            fixed_settings = {}
+            
+            # 계정 정보
+            fixed_settings['accounts'] = task_settings.get('accounts', {})
+            
+            # 작업 목록
+            fixed_settings['tasks'] = task_settings.get('tasks', [])
+            
+            # 작업 설정
+            task_setting_data = task_settings.get('task_settings', {})
+            fixed_task_settings = {}
+            
+            for key, value in task_setting_data.items():
+                if isinstance(value, str):
+                    # 문자열인 경우에만 인코딩 처리
+                    fixed_task_settings[key] = value
+                else:
+                    fixed_task_settings[key] = value
+            
+            fixed_settings['task_settings'] = fixed_task_settings
+            fixed_settings['saved_at'] = task_settings['saved_at']
+            
+            # 저장 전 내용 출력
+            print(f"저장할 설정 내용: {fixed_settings}")
+            
             # JSON 파일로 저장
             with open(file_path, 'w', encoding='utf-8') as f:
-                json.dump(task_settings, f, ensure_ascii=False, indent=2)
+                json.dump(fixed_settings, f, ensure_ascii=False, indent=2)
             
             return True
         except Exception as e:
-            print(f"작업 설정 저장 중 오류 발생: {str(e)}")
+            print(f"설정 저장 중 오류 발생: {str(e)}")
             return False
     
     def load_task_settings(self, filename):
-        """작업 설정 불러오기
+        """설정 불러오기
         
         Args:
             filename (str): 불러올 파일 이름 (확장자 제외)
             
         Returns:
-            dict: 불러온 작업 설정 (실패 시 None)
+            dict: 불러온 설정 (실패 시 None)
         """
         try:
             # 파일 경로 생성
@@ -66,16 +92,45 @@ class TaskManager:
             with open(file_path, 'r', encoding='utf-8') as f:
                 task_settings = json.load(f)
             
+            # 불러온 설정 파일 정보 출력
+            print(f"불러온 설정 파일 정보: {filename}")
+            print(f"계정: {list(task_settings.get('accounts', {}).keys())}")
+            print(f"작업 설정 키: {list(task_settings.get('task_settings', {}).keys())}")
+            
+            # 디버그용: 설정 키 값들 출력
+            task_settings_data = task_settings.get('task_settings', {})
+            for key, value in task_settings_data.items():
+                if isinstance(value, str):
+                    print(f"설정 키: {key}, 값: {value}")
+                
+            # 한글 인코딩 문제 해결
+            tasks_fixed = []
+            for task in task_settings.get('tasks', []):
+                task_fixed = task.copy()
+                
+                # 키워드 인코딩 수정
+                if 'keywords' in task and isinstance(task['keywords'], list):
+                    task_fixed['keywords'] = task['keywords']
+                
+                # AI 키워드 인코딩 수정
+                if 'ai_keywords' in task and isinstance(task['ai_keywords'], list):
+                    task_fixed['ai_keywords'] = task['ai_keywords']
+                
+                tasks_fixed.append(task_fixed)
+            
+            # 수정된 작업 목록으로 교체
+            task_settings['tasks'] = tasks_fixed
+            
             return task_settings
         except Exception as e:
-            print(f"작업 설정 불러오기 중 오류 발생: {str(e)}")
+            print(f"설정 불러오기 중 오류 발생: {str(e)}")
             return None
     
     def get_task_list(self):
-        """저장된 작업 설정 목록 조회
+        """저장된 설정 목록 조회
         
         Returns:
-            list: 작업 설정 파일 목록 (확장자 제외)
+            list: 설정 파일 목록 (확장자 제외)
         """
         try:
             # 디렉토리 내 모든 파일 조회
@@ -86,11 +141,11 @@ class TaskManager:
             
             return task_files
         except Exception as e:
-            print(f"작업 설정 목록 조회 중 오류 발생: {str(e)}")
+            print(f"설정 목록 조회 중 오류 발생: {str(e)}")
             return []
     
     def delete_task_settings(self, filename):
-        """작업 설정 삭제
+        """설정 삭제
         
         Args:
             filename (str): 삭제할 파일 이름 (확장자 제외)
@@ -112,11 +167,11 @@ class TaskManager:
             
             return True
         except Exception as e:
-            print(f"작업 설정 삭제 중 오류 발생: {str(e)}")
+            print(f"설정 삭제 중 오류 발생: {str(e)}")
             return False
     
     def rename_task_settings(self, old_filename, new_filename):
-        """작업 설정 이름 변경
+        """설정 이름 변경
         
         Args:
             old_filename (str): 기존 파일 이름 (확장자 제외)
@@ -145,20 +200,20 @@ class TaskManager:
             
             return True
         except Exception as e:
-            print(f"작업 설정 이름 변경 중 오류 발생: {str(e)}")
+            print(f"설정 이름 변경 중 오류 발생: {str(e)}")
             return False
     
     def get_task_info(self, filename):
-        """작업 설정 정보 조회 (간략 정보)
+        """설정 정보 조회 (간략 정보)
         
         Args:
             filename (str): 조회할 파일 이름 (확장자 제외)
             
         Returns:
-            dict: 작업 설정 간략 정보 (실패 시 None)
+            dict: 설정 간략 정보 (실패 시 None)
         """
         try:
-            # 작업 설정 불러오기
+            # 설정 불러오기
             task_settings = self.load_task_settings(filename)
             
             if not task_settings:
@@ -176,5 +231,5 @@ class TaskManager:
             
             return task_info
         except Exception as e:
-            print(f"작업 설정 정보 조회 중 오류 발생: {str(e)}")
+            print(f"설정 정보 조회 중 오류 발생: {str(e)}")
             return None 
