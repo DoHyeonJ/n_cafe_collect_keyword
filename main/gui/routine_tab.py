@@ -2,10 +2,26 @@ from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout,
                            QPushButton, QGroupBox, QLabel, QTableWidget, 
                            QHeaderView, QTableWidgetItem, QTabWidget, 
                            QTextEdit, QMessageBox, QFileDialog)
-from PyQt5.QtCore import Qt, pyqtSignal
+from PyQt5.QtCore import Qt, pyqtSignal, QUrl, QThread
+from PyQt5.QtGui import QTextOption, QDesktopServices, QColor
 from datetime import datetime
 from ..utils.log import Log
 import pandas as pd
+import threading  # 스레드 모듈 추가
+
+class UrlOpenerThread(QThread):
+    """URL을 별도의 스레드에서 여는 클래스"""
+    
+    def __init__(self, url):
+        super().__init__()
+        self.url = url
+        
+    def run(self):
+        try:
+            # QDesktopServices는 Qt의 GUI 스레드에서 호출되어야 함
+            QDesktopServices.openUrl(QUrl(self.url))
+        except Exception as e:
+            print(f"URL 열기 오류: {e}")
 
 class RoutineTab(QWidget):
     execute_tasks_clicked = pyqtSignal(bool)  # 작업 실행/정지 시그널
@@ -80,6 +96,9 @@ class RoutineTab(QWidget):
         self.task_monitor = QTableWidget(0, 4)
         self.task_monitor.setHorizontalHeaderLabels(["NO", "아이디", "내용", "URL"])
         
+        # URL 클릭 이벤트 연결
+        self.task_monitor.cellClicked.connect(self.handle_cell_click)
+        
         # 컬럼 너비 설정
         header = self.task_monitor.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.Fixed)  # NO
@@ -93,6 +112,9 @@ class RoutineTab(QWidget):
         
         # 가로 스크롤바 숨기기
         self.task_monitor.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        
+        # 테이블 코너 버튼 배경색 설정
+        self.task_monitor.setCornerButtonEnabled(False)
         
         # 테이블 스타일 설정
         self.task_monitor.setStyleSheet("""
@@ -113,11 +135,18 @@ class RoutineTab(QWidget):
                 color: white;
                 font-weight: bold;
             }
+            QTableCornerButton::section {
+                background-color: #353535;
+                border: 1px solid #3d3d3d;
+            }
         """)
         
         # 로그 모니터 추가
         self.log_monitor = QTableWidget(0, 2)
         self.log_monitor.setHorizontalHeaderLabels(["시간", "메시지"])
+        
+        # 로그 모니터 코너 버튼 배경색 설정
+        self.log_monitor.setCornerButtonEnabled(False)
         
         # 로그 모니터 컬럼 너비 설정
         log_header = self.log_monitor.horizontalHeader()
@@ -179,7 +208,7 @@ class RoutineTab(QWidget):
         # 메인 레이아웃에 위젯 추가
         layout.addWidget(button_container)
         layout.addWidget(self.task_monitor)
-        layout.addWidget(self.next_task_label)
+        # layout.addWidget(self.next_task_label)
         layout.addWidget(self.log_monitor)
         layout.addWidget(self.execute_btn)
         self.setLayout(layout)
@@ -389,4 +418,43 @@ class RoutineTab(QWidget):
                 QMessageBox.information(self, '초기화 완료', '작업 모니터가 초기화되었습니다.')
             except Exception as e:
                 self.log.error(f'작업 모니터 초기화 중 오류 발생: {str(e)}')
-                QMessageBox.critical(self, '오류', f'작업 모니터 초기화 중 오류가 발생했습니다:\n{str(e)}') 
+                QMessageBox.critical(self, '오류', f'작업 모니터 초기화 중 오류가 발생했습니다:\n{str(e)}')
+
+    def handle_cell_click(self, row, column):
+        """테이블 셀 클릭 이벤트 처리"""
+        # URL 열(3번 열)을 클릭한 경우에만 처리
+        if column == 3:
+            try:
+                # URL 가져오기
+                url_item = self.task_monitor.item(row, column)
+                if url_item:
+                    # UserRole에서 URL 데이터 가져오기 (없으면 텍스트 사용)
+                    url = url_item.data(Qt.UserRole) or url_item.text()
+                    if url:
+                        # 브라우저에서 URL 열기
+                        print(f"URL 열기 시도: {url}")
+                        QDesktopServices.openUrl(QUrl(url))
+                        self.log.info(f"URL 열기: {url}")
+            except Exception as e:
+                self.log.error(f"URL 열기 중 오류 발생: {str(e)}")
+                print(f"URL 열기 오류: {str(e)}")
+
+    def on_post_added(self, row):
+        """게시글이 추가되면 URL 항목에 스타일 적용"""
+        try:
+            # URL 칼럼의 아이템 가져오기
+            url_item = self.task_monitor.item(row, 3)
+            if url_item and url_item.text():
+                url = url_item.text()
+                
+                # 직접 기존 아이템을 수정
+                url_item.setData(Qt.UserRole, url)  # 실제 URL을 UserRole로 저장
+                url_item.setForeground(QColor("blue"))  # 파란색으로 표시
+                url_item.setToolTip("클릭하여 브라우저에서 열기")
+                
+                print(f"URL 스타일 적용: {url}")
+            else:
+                print(f"URL 아이템이 없거나 비어 있음: 행={row}")
+        except Exception as e:
+            self.log.error(f"URL 스타일 적용 중 오류 발생: {str(e)}")
+            print(f"URL 스타일 적용 오류: {str(e)}") 

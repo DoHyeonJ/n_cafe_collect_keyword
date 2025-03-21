@@ -107,10 +107,12 @@ class SettingsDialog(QDialog):
         self.keyword_label = QLabel("-")
         self.target_label = QLabel("-")
         self.sort_label = QLabel("-")
+        self.date_label = QLabel("-")  # 기간 레이블 추가
         self.trade_method_label = QLabel("-")
         self.trade_status_label = QLabel("-")
         self.api_key_label = QLabel("-")
         self.ai_keyword_label = QLabel("-")
+        self.max_items_label = QLabel("-")  # 수집 개수 정보 추가
         
         # 정보 추가
         info_layout.addRow("파일명:", self.filename_label)
@@ -119,6 +121,8 @@ class SettingsDialog(QDialog):
         info_layout.addRow("검색 키워드:", self.keyword_label)
         info_layout.addRow("대상:", self.target_label)
         info_layout.addRow("정렬 방식:", self.sort_label)
+        info_layout.addRow("기간:", self.date_label)  # 기간 레이블 추가
+        info_layout.addRow("수집 개수:", self.max_items_label)  # 수집 개수 정보 추가
         info_layout.addRow("거래 방법:", self.trade_method_label)
         info_layout.addRow("거래 상태:", self.trade_status_label)
         info_layout.addRow("API KEY:", self.api_key_label)
@@ -186,6 +190,8 @@ class SettingsDialog(QDialog):
         self.keyword_label.setText("-")
         self.target_label.setText("-")
         self.sort_label.setText("-")
+        self.date_label.setText("-")
+        self.max_items_label.setText("-")  # 수집 개수 정보 추가
         self.trade_method_label.setText("-")
         self.trade_status_label.setText("-")
         self.api_key_label.setText("-")
@@ -243,6 +249,24 @@ class SettingsDialog(QDialog):
             sort_option = first_task.get('sort_option', '-')
             self.sort_label.setText(sort_option)
             
+            # 기간 정보 표시
+            date_options = {
+                0: '전체',
+                1: '1시간',
+                2: '1일',
+                3: '1주',
+                4: '1개월',
+                5: '3개월',
+                6: '6개월',
+                7: '1년'
+            }
+            date_option = first_task.get('date_option', 2)  # 기본값 1일
+            self.date_label.setText(date_options.get(date_option, str(date_option)))
+            
+            # 수집 개수 정보 추가
+            max_items = first_task.get('max_items', 100)  # 기본값 100개
+            self.max_items_label.setText(f"{max_items}개")
+            
             # 거래 방법
             trade_method = first_task.get('trade_method', '-')
             self.trade_method_label.setText(trade_method)
@@ -258,6 +282,8 @@ class SettingsDialog(QDialog):
             self.keyword_label.setText("-")
             self.target_label.setText("-")
             self.sort_label.setText("-")
+            self.date_label.setText("-")
+            self.max_items_label.setText("-")  # 수집 개수 정보 추가
             self.trade_method_label.setText("-")
             self.trade_status_label.setText("-")
             self.ai_keyword_label.setText("-")

@@ -1,6 +1,9 @@
 from main.utils.openai_utils import OpenAIGenerator
 import os
 import openai
+import json
+import time
+import logging
 
 class AIGenerator:
     def __init__(self, api_key=None):
@@ -11,6 +14,8 @@ class AIGenerator:
         """
         self.api_key = api_key or os.environ.get("OPENAI_API_KEY")
         self.generator = OpenAIGenerator(api_key=self.api_key)
+        logging.basicConfig(level=logging.INFO)
+        self.logger = logging.getLogger("AIGenerator")
     
     def validate_api_key(self):
         """API 키 유효성 검사
@@ -25,23 +30,30 @@ class AIGenerator:
             
         try:
             # OpenAI 클라이언트 설정
+            self.logger.info("API 키 검증 중...")
             openai.api_key = self.api_key
             
             # API 키 검증을 위한 간단한 요청
+            start_time = time.time()
             response = openai.chat.completions.create(
                 model="gpt-3.5-turbo",
                 messages=[{"role": "user", "content": "test"}],
                 max_tokens=5
             )
+            elapsed_time = time.time() - start_time
             
             # 응답이 성공적으로 왔다면 API 키가 유효한 것
-            return True, "API 키가 유효합니다."
+            self.logger.info(f"API 키 검증 성공 (응답 시간: {elapsed_time:.2f}초)")
+            return True, f"API 키가 유효합니다. (응답 시간: {elapsed_time:.2f}초)"
             
         except openai.AuthenticationError:
+            self.logger.error("API 키 인증 오류: 유효하지 않은 API 키")
             return False, "유효하지 않은 API 키입니다."
         except openai.RateLimitError:
+            self.logger.error("API 키 오류: 사용량 한도 초과")
             return False, "API 사용량이 한도를 초과했습니다."
         except Exception as e:
+            self.logger.error(f"API 키 검증 중 오류 발생: {str(e)}")
             return False, f"API 키 검증 중 오류 발생: {str(e)}"
     
     def analyze_post_with_command(self, title, content, command):
@@ -59,6 +71,14 @@ class AIGenerator:
                 - analysis (str): 분석 내용 요약
         """
         try:
+            # 로깅 시작
+            self.logger.info(f"게시글 분석 시작: 제목=\"{title}\"")
+            
+            # 내용 요약: 너무 긴 내용은 일부만 로깅
+            content_summary = content[:1000] + "..." if len(content) > 1000 else content
+            self.logger.info(f"분석 내용 요약: {content_summary}")
+            self.logger.info(f"분석 명령: {command}")
+            
             # OpenAI 클라이언트 설정
             openai.api_key = self.api_key
             
@@ -67,10 +87,10 @@ class AIGenerator:
             제목: {title}
             내용: {content}
             
-            명령: {command}
+            추출 핵심 키워드 : {command}
             
-            위 명령에 따라 이 게시글이 해당 조건에 맞는지 분석해주세요.
-            이 게시글이 명령 조건에 맞는지 정확히 True 또는 False로만 판단해주세요.
+            위 추출 핵심 키워드에 해당하는 글인지 분석해주세요.
+            이 게시글이 추출 핵심 키워드에 해당하는지 정확히 True 또는 False로만 판단해주세요.
             
             다음 형식으로 응답해주세요:
             1. 관련성: [True/False]
@@ -79,15 +99,20 @@ class AIGenerator:
             """
             
             # OpenAI API 호출
+            self.logger.info("OpenAI API 호출 중...")
+            start_time = time.time()
             response = openai.chat.completions.create(
                 model="gpt-4o-mini",  # 또는 다른 적절한 모델
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.1,  # 더 결정적인 응답을 위해 temperature 낮춤
                 max_tokens=500
             )
+            elapsed_time = time.time() - start_time
+            self.logger.info(f"API 응답 완료 (소요 시간: {elapsed_time:.2f}초)")
             
             # 응답 처리
             analysis_text = response.choices[0].message.content.strip()
+            self.logger.info(f"원본 응답:\n{analysis_text}")
             
             # 응답 파싱
             lines = analysis_text.split('\n')
@@ -97,6 +122,7 @@ class AIGenerator:
             if len(lines) > 0:
                 relevance_line = lines[0].lower()
                 is_relevant = 'true' in relevance_line
+                self.logger.info(f"관련성 판단: {is_relevant}")
             
             # 매칭된 키워드 추출
             matched_keywords = []
@@ -105,6 +131,7 @@ class AIGenerator:
                 if ':' in keywords_line:
                     keywords_text = keywords_line.split(':')[1].strip()
                     matched_keywords = [k.strip() for k in keywords_text.split(',')]
+                    self.logger.info(f"매칭된 키워드: {matched_keywords}")
             
             # 분석 내용 추출
             analysis = ""
@@ -112,14 +139,20 @@ class AIGenerator:
                 analysis_line = ' '.join(lines[2:])
                 if ':' in analysis_line:
                     analysis = analysis_line.split(':')[1].strip()
+                    self.logger.info(f"분석 내용: {analysis}")
             
-            return {
+            # 최종 분석 결과
+            result = {
                 "is_relevant": is_relevant,
                 "matched_keywords": matched_keywords,
                 "analysis": analysis
             }
             
+            self.logger.info(f"분석 결과: {json.dumps(result, ensure_ascii=False)}")
+            return result
+            
         except Exception as e:
+            self.logger.error(f"분석 중 오류 발생: {str(e)}")
             return {
                 "is_relevant": False,
                 "matched_keywords": [],

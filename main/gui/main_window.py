@@ -1,7 +1,7 @@
 from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
                            QGroupBox, QPushButton, QLabel, QLineEdit, QComboBox, 
                            QAction, QFileDialog, QMenu, QMenuBar, QMessageBox, 
-                           QSystemTrayIcon, QToolBar, QInputDialog, QDialog, QProgressDialog, QFormLayout, QListWidget, QScrollArea, QSpinBox, QTableWidgetItem, QApplication)
+                           QSystemTrayIcon, QToolBar, QInputDialog, QDialog, QProgressDialog, QFormLayout, QListWidget, QScrollArea, QSpinBox, QTableWidgetItem, QApplication, QTabWidget)
 from PyQt5.QtCore import Qt, QTimer, QThread, pyqtSignal, QSettings, QSize, QUrl, QRect, QPoint
 from PyQt5.QtGui import QIcon, QPixmap, QDesktopServices, QFont, QColor
 
@@ -17,6 +17,7 @@ from ..worker import Worker
 import time
 import os
 from datetime import datetime
+import uuid
 
 class TaskDetailDialog(QDialog):
     def __init__(self, task, parent=None):
@@ -571,6 +572,7 @@ class MainWindow(QMainWindow):
         
         # 계정 정보 초기화
         self.accounts = {}  # 계정 정보 저장 딕셔너리
+        self.account_headers = None  # 로그인된 계정의 헤더 정보 추가
         
         # 작업 목록 초기화
         self.tasks = []  # 작업 목록
@@ -674,13 +676,35 @@ class MainWindow(QMainWindow):
         return False
 
     def init_ui(self):
+        """UI 초기화"""
+        # 라이브러리 가져오기
+        from PyQt5.QtWidgets import QAction, QLabel, QTextEdit, qApp, QTabWidget, QSplitter, QVBoxLayout
+
         # 메인 위젯 생성
         main_widget = QWidget()
+        
+        # 창 설정
+        self.setWindowTitle("네이버 카페 콜렉터")
+        self.setMinimumSize(1200, 800)  # 최소 크기 설정
+        self.setStyleSheet(DARK_STYLE)
+        
+        # 중앙 위젯 설정
         self.setCentralWidget(main_widget)
         
         # 메인 레이아웃 설정 (좌우 분할)
         main_layout = QHBoxLayout()
         main_widget.setLayout(main_layout)
+        
+        # 실행 탭 먼저 생성
+        self.tabs = QTabWidget()
+        
+        # 작업 실행 중 수집된 게시글을 표시하는 모니터 테이블
+        self.routine_tab = RoutineTab(self.log)
+        self.routine_tab.execute_tasks_clicked.connect(self.run_tasks)
+        self.tabs.addTab(self.routine_tab, "")  # 탭 이름 제거
+        
+        # 탭 바 숨기기
+        self.tabs.tabBar().setVisible(False)
         
         # 좌측 영역 (계정 관리 + 설정)
         left_widget = QWidget()
@@ -692,8 +716,8 @@ class MainWindow(QMainWindow):
         account_layout = QVBoxLayout()
         account_group.setLayout(account_layout)
         
-        # 계정 위젯 생성
-        self.account_widget = AccountWidget(self.log, self.monitor_widget)
+        # 계정 위젯 생성 (이제 routine_tab이 초기화된 후에 호출됨)
+        self.account_widget = AccountWidget(self.log, self.routine_tab)
         account_layout.addWidget(self.account_widget)
         
         # 계정 위젯 시그널 연결
@@ -750,7 +774,10 @@ class MainWindow(QMainWindow):
         target_label = QLabel("대상:")
         target_label.setStyleSheet("color: white;")
         self.target_combo = QComboBox()
-        self.target_combo.addItems(["전체글", "거래글", "일반글", "카페명"])
+        self.target_combo.addItem("전체글", "article")
+        self.target_combo.addItem("거래글", "articlec")
+        self.target_combo.addItem("일반글", "articleg")
+        self.target_combo.addItem("카페명", "cafe")
         self.target_combo.setStyleSheet("""
             QComboBox {
                 background-color: #2b2b2b;
@@ -780,15 +807,81 @@ class MainWindow(QMainWindow):
         
         sort_label = QLabel("정렬:")
         sort_label.setStyleSheet("color: white;")
-        self.sort_combo = QComboBox()
-        self.sort_combo.addItems(["관련도순", "최신순", "1시간", "1일", "1주", "1개월", "3개월", "6개월", "1년"])
-        self.sort_combo.setStyleSheet(self.target_combo.styleSheet())
+        self.search_sort_combo = QComboBox()
+        self.search_sort_combo.addItem("관련도순", "rel")
+        self.search_sort_combo.addItem("최신순", "date")
+        self.search_sort_combo.setStyleSheet(self.target_combo.styleSheet())
         
         sort_layout.addWidget(sort_label)
-        sort_layout.addWidget(self.sort_combo)
+        sort_layout.addWidget(self.search_sort_combo)
         sort_widget.setLayout(sort_layout)
         
-        # 거래방법 설정
+        # 기간 설정
+        date_widget = QWidget()
+        date_layout = QHBoxLayout()
+        date_layout.setContentsMargins(0, 0, 0, 0)
+        
+        date_label = QLabel("기간:")
+        date_label.setStyleSheet("color: white;")
+        self.search_date_combo = QComboBox()
+        self.search_date_combo.addItem("전체", 0)
+        self.search_date_combo.addItem("1시간", 1)
+        self.search_date_combo.addItem("1일", 2)
+        self.search_date_combo.addItem("1주", 3)
+        self.search_date_combo.addItem("1개월", 4)
+        self.search_date_combo.addItem("3개월", 5)
+        self.search_date_combo.addItem("6개월", 6)
+        self.search_date_combo.addItem("1년", 7)
+        self.search_date_combo.setStyleSheet(self.target_combo.styleSheet())
+        self.search_date_combo.setMinimumWidth(100)  # 최소 너비 설정
+        
+        date_layout.addWidget(date_label)
+        date_layout.addWidget(self.search_date_combo)
+        date_widget.setLayout(date_layout)
+        date_widget.setVisible(True)  # 명시적으로 보이게 설정
+        
+        # 수집할 게시글 개수 설정
+        max_items_widget = QWidget()
+        max_items_layout = QHBoxLayout()
+        max_items_layout.setContentsMargins(0, 0, 0, 0)
+        
+        max_items_label = QLabel("수집 개수:")
+        max_items_label.setStyleSheet("color: white;")
+        self.search_max_items_input = QSpinBox()
+        self.search_max_items_input.setMinimum(10)
+        self.search_max_items_input.setMaximum(500)
+        self.search_max_items_input.setValue(100)
+        self.search_max_items_input.setSingleStep(10)
+        self.search_max_items_input.setStyleSheet("""
+            QSpinBox {
+                background-color: #2b2b2b;
+                color: white;
+                border: 1px solid #3d3d3d;
+                padding: 5px;
+                border-radius: 4px;
+                min-width: 100px;
+            }
+            QSpinBox::up-button, QSpinBox::down-button {
+                border: none;
+                width: 16px;
+                background-color: #3d3d3d;
+            }
+            QSpinBox::up-arrow {
+                image: url(resources/up_arrow.png);
+                width: 12px;
+                height: 12px;
+            }
+            QSpinBox::down-arrow {
+                image: url(resources/down_arrow.png);
+                width: 12px;
+                height: 12px;
+            }
+        """)
+        
+        max_items_layout.addWidget(max_items_label)
+        max_items_layout.addWidget(self.search_max_items_input)
+        max_items_widget.setLayout(max_items_layout)
+        
         trade_widget = QWidget()
         trade_layout = QHBoxLayout()
         trade_layout.setContentsMargins(0, 0, 0, 0)
@@ -796,7 +889,9 @@ class MainWindow(QMainWindow):
         trade_label = QLabel("거래방법:")
         trade_label.setStyleSheet("color: white;")
         self.trade_combo = QComboBox()
-        self.trade_combo.addItems(["전체", "안전결제", "일반결제"])
+        self.trade_combo.addItem("전체", "all")
+        self.trade_combo.addItem("안전결제", "safe")
+        self.trade_combo.addItem("일반결제", "normal")
         self.trade_combo.setStyleSheet(self.target_combo.styleSheet())
         
         trade_layout.addWidget(trade_label)
@@ -811,7 +906,9 @@ class MainWindow(QMainWindow):
         status_label = QLabel("거래상태:")
         status_label.setStyleSheet("color: white;")
         self.status_combo = QComboBox()
-        self.status_combo.addItems(["전체", "판매중", "판매완료"])
+        self.status_combo.addItem("전체", "all")
+        self.status_combo.addItem("판매중", "selling")
+        self.status_combo.addItem("판매완료", "sold")
         self.status_combo.setStyleSheet(self.target_combo.styleSheet())
         
         status_layout.addWidget(status_label)
@@ -902,6 +999,8 @@ class MainWindow(QMainWindow):
         search_layout.addWidget(keyword_widget)  # 검색 키워드 추가
         search_layout.addWidget(target_widget)
         search_layout.addWidget(sort_widget)
+        search_layout.addWidget(date_widget)  # 기간 위젯 추가
+        search_layout.addWidget(max_items_widget)  # 수집 개수 위젯 추가
         search_layout.addWidget(trade_widget)
         search_layout.addWidget(status_widget)
         search_settings.setLayout(search_layout)
@@ -918,33 +1017,30 @@ class MainWindow(QMainWindow):
         left_layout.addWidget(account_group, 6)
         left_layout.addWidget(settings_group, 4)
         
-        # 우측 영역 (모니터링/작업)
+        # 우측 영역 (탭 위젯 추가)
         right_widget = QWidget()
         right_layout = QVBoxLayout()
         right_widget.setLayout(right_layout)
         
-        # 모니터링 영역
-        monitor_group = QGroupBox("모니터링")
-        monitor_layout = QVBoxLayout()
-        monitor_group.setLayout(monitor_layout)
-        
-        # 모니터링 위젯 추가
-        monitor_layout.addWidget(self.monitor_widget)
-        
-        # 우측 레이아웃에 모니터링 그룹 추가
-        right_layout.addWidget(monitor_group)
+        # 탭 위젯을 우측 레이아웃에 추가
+        right_layout.addWidget(self.tabs)
         
         # 메인 레이아웃에 좌우 위젯 추가 (비율 3:7)
         main_layout.addWidget(left_widget, 3)
         main_layout.addWidget(right_widget, 7)
         
+        # 상태 표시줄 설정
+        self.statusBar().showMessage("준비됨")
+        
+        # 탭 전환 시그널 연결
+        self.tabs.currentChanged.connect(self.on_tab_changed)
+        
+        # 창 크기 및 기본 설정
+        self.setWindowTitle('네카페 게시글 수집기')
+        self.setGeometry(100, 100, 1024, 768)
+        
         # 메뉴바 생성
         self.create_menu_bar()
-        
-        # 윈도우 설정
-        self.setWindowTitle("네이버 카페 댓글 프로그램")
-        self.setGeometry(100, 100, 1050, 750)
-        self.setStyleSheet(DARK_STYLE)
 
     def create_menu_bar(self):
         """메뉴바 생성"""
@@ -1067,92 +1163,83 @@ class MainWindow(QMainWindow):
         dialog.exec_()
 
     def get_all_settings(self):
-        """현재 모든 설정값 반환 - 계정 목록과 작업 목록만 저장"""
-        # 작업 설정 정보 가져오기
-        task_settings = {
-            'api_key': ''  # 기본값
-        }
-        
-        # 안전하게 작업 설정 정보 가져오기
+        """모든 설정 정보를 가져오는 메서드"""
         try:
-            # API 키 가져오기
-            if hasattr(self, 'api_key_input'):
-                task_settings['api_key'] = self.api_key_input.text().strip()
-                print(f"API 키 가져옴: {task_settings['api_key']}")
+            settings = {}
             
-            # AI 분석 키워드 가져오기
-            if hasattr(self, 'ai_keyword_input'):
-                task_settings['ai_keywords'] = self.ai_keyword_input.text().strip()
-                print(f"AI 키워드 가져옴: {task_settings['ai_keywords']}")
+            # 저장 시간 추가
+            settings['saved_at'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             
-            # 검색 키워드 가져오기
-            if hasattr(self, 'keyword_input'):
-                task_settings['search_keywords'] = self.keyword_input.text().strip()
-                print(f"검색 키워드 가져옴: {task_settings['search_keywords']}")
+            # 계정 정보 가져오기
+            settings['accounts'] = self.get_accounts_settings()
             
-            # 대상, 정렬, 거래 방법, 거래 상태 가져오기
-            if hasattr(self, 'target_combo'):
-                task_settings['target'] = self.target_combo.currentText()
-                print(f"대상 가져옴: {task_settings['target']}")
+            # 작업 목록 생성
+            tasks = []
             
-            if hasattr(self, 'sort_combo'):
-                task_settings['sort_option'] = self.sort_combo.currentText()
-                print(f"정렬 가져옴: {task_settings['sort_option']}")
+            # 검색 키워드 (쉼표로 구분)
+            search_keywords = self.keyword_input.text().strip().split(',')
+            search_keywords = [k.strip() for k in search_keywords if k.strip()]
             
-            if hasattr(self, 'trade_combo'):
-                task_settings['trade_method'] = self.trade_combo.currentText()
-                print(f"거래 방법 가져옴: {task_settings['trade_method']}")
+            # 검색 대상
+            target_data = self.target_combo.currentData()
+            target_text = self.target_combo.currentText()
             
-            if hasattr(self, 'status_combo'):
-                task_settings['trade_status'] = self.status_combo.currentText()
-                print(f"거래 상태 가져옴: {task_settings['trade_status']}")
-                
+            # 정렬 옵션
+            sort_data = self.search_sort_combo.currentData()
+            sort_text = self.search_sort_combo.currentText()
+            
+            # 기간 옵션
+            date_option = self.search_date_combo.currentData() if hasattr(self, 'search_date_combo') else 2
+            
+            # 수집 개수 옵션
+            max_items = self.search_max_items_input.value() if hasattr(self, 'search_max_items_input') else 100
+            
+            # 거래 설정 (거래글 검색 시에만 사용)
+            trade_method = self.trade_combo.currentData()
+            trade_method_text = self.trade_combo.currentText()
+            
+            status = self.status_combo.currentData()
+            status_text = self.status_combo.currentText()
+            
+            # AI 분석 키워드 (쉼표로 구분)
+            ai_keywords_text = self.ai_keyword_input.text().strip()
+            ai_keywords = [k.strip() for k in ai_keywords_text.split(',') if k.strip()]
+            
+            # 작업 1개 생성
+            task = {
+                'id': f'task_{uuid.uuid4().hex[:8]}',
+                'keywords': search_keywords,
+                'target': target_text,
+                'target_value': target_data,
+                'sort_option': sort_text,
+                'sort_value': sort_data,
+                'date_option': date_option,
+                'max_items': max_items,  # 수집 개수 설정 추가
+                'trade_method': trade_method_text,
+                'trade_method_value': trade_method,
+                'trade_status': status_text,
+                'trade_status_value': status,
+                'ai_keywords': ai_keywords,
+                'created_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            }
+            
+            tasks.append(task)
+            
+            # 작업 목록 설정
+            settings['tasks'] = tasks
+            
+            # 전역 설정 (작업 외 설정)
+            settings['task_settings'] = {
+                'api_key': self.api_key_input.text().strip(),
+                'search_keywords': self.keyword_input.text().strip(),
+                'ai_keywords': ai_keywords_text,
+            }
+            
+            return settings
         except Exception as e:
-            print(f"설정 정보 가져오기 오류: {str(e)}")
-        
-        # 계정 정보 가져오기 (account_widget에서)
-        accounts = {}
-        try:
-            if hasattr(self, 'account_widget'):
-                # 계정 ID와 비밀번호 가져오기
-                account_id = self.account_widget.id_input.text().strip()
-                password = self.account_widget.pw_input.text().strip()
-                
-                if account_id:
-                    accounts[account_id] = {'pw': password}
-                    print(f"계정 정보 가져옴: {account_id}")
-        except Exception as e:
-            print(f"계정 정보 가져오기 오류: {str(e)}")
-        
-        # 작업 목록 가져오기
-        tasks = []
-        try:
-            if hasattr(self, 'tasks') and self.tasks:
-                tasks = self.tasks.copy()
-                print(f"기존 작업 {len(tasks)}개 가져옴")
-            else:
-                # 작업이 없는 경우 현재 설정으로 기본 작업 생성
-                if task_settings.get('search_keywords'):
-                    task = {
-                        'id': f'task_{datetime.now().strftime("%Y%m%d_%H%M%S")}',
-                        'keywords': [kw.strip() for kw in task_settings.get('search_keywords', '').split(',') if kw.strip()],
-                        'target': task_settings.get('target', ''),
-                        'sort_option': task_settings.get('sort_option', ''),
-                        'trade_method': task_settings.get('trade_method', ''),
-                        'trade_status': task_settings.get('trade_status', ''),
-                        'ai_keywords': [kw.strip() for kw in task_settings.get('ai_keywords', '').split(',') if kw.strip()]
-                    }
-                    tasks.append(task)
-                    print(f"새 작업 생성: {task['id']}")
-        except Exception as e:
-            print(f"작업 목록 가져오기 오류: {str(e)}")
-            
-        return {
-            'accounts': accounts,
-            'tasks': tasks,
-            'task_settings': task_settings,
-            'saved_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        }
+            self.log.error(f"설정 정보 가져오기 실패: {str(e)}")
+            print(f"설정 정보 가져오기 중 오류: {str(e)}")
+            return {}
     
     def get_accounts_settings(self):
         """계정 설정 정보 반환 - 기본 정보만 저장"""
@@ -1166,208 +1253,134 @@ class MainWindow(QMainWindow):
         return accounts_data
     
     def apply_settings(self, settings_data):
-        """불러온 설정 적용"""
-        # 기존 데이터 초기화
-        old_accounts = self.accounts.copy()
-        self.accounts = {}
-        self.tasks = []
+        """불러온 설정을 UI에 적용하는 메서드
         
-        # 계정 정보 처리 및 로그인 진행
-        if 'accounts' in settings_data:
-            print("계정 정보 적용 시작...")
-            accounts_to_login = []
+        Args:
+            settings_data (dict): 설정 데이터
             
-            for account_id, account_info in settings_data['accounts'].items():
-                # 로그인이 필요한 계정 목록에 추가
-                if account_info and 'pw' in account_info:
-                    accounts_to_login.append((account_id, account_info['pw']))
-            
-            # 로그인이 필요한 계정이 있으면 즉시 처리
-            if accounts_to_login:
-                first_account = accounts_to_login[0]  # 첫 번째 계정만 사용
-                account_id, password = first_account
+        Returns:
+            bool: 설정 적용 성공 여부
+        """
+        try:
+            # 적용할 설정이 없으면 종료
+            if not settings_data:
+                print("적용할 설정이 없습니다.")
+                return False
                 
-                # 계정 위젯이 있는지 확인
-                if hasattr(self, 'account_widget'):
-                    # 계정 위젯이 있으면 UI 필드에 값 설정
-                    print(f"계정 위젯에 계정 정보 설정: {account_id}")
-                    if hasattr(self.account_widget, 'id_input'):
-                        self.account_widget.id_input.setText(account_id)
-                    if hasattr(self.account_widget, 'pw_input'):
-                        self.account_widget.pw_input.setText(password)
+            # 1. API 키 및 기타 설정 적용
+            task_settings = settings_data.get('task_settings', {})
+            
+            # API 키 적용
+            if hasattr(self, 'api_key_input') and 'api_key' in task_settings:
+                self.api_key_input.setText(task_settings['api_key'])
+                if task_settings['api_key']:
+                    print(f"API 키 적용됨: {task_settings['api_key'][:4]}...{task_settings['api_key'][-4:]}")
                     
-                    # 로그인 자동 진행
-                    print(f"계정 {account_id} 자동 로그인 시작...")
-                    if hasattr(self.account_widget, 'login_btn'):
-                        try:
-                            QApplication.processEvents()  # UI 업데이트 처리
-                            self.account_widget.login_btn.click()  # 로그인 버튼 클릭
-                            print(f"계정 {account_id} 자동 로그인 요청 완료")
-                            
-                            # 계정 정보 미리 저장
-                            self.accounts[account_id] = {
-                                'pw': password,
-                                'headers': None  # 로그인 완료 후 업데이트될 예정
-                            }
-                            print(f"계정 정보 저장됨: {account_id}")
-                        except Exception as e:
-                            print(f"자동 로그인 시도 중 오류: {str(e)}")
+                    # API 키 검증 트리거 (비동기로 처리)
+                    QTimer.singleShot(100, self.validate_api_key)
                 else:
-                    print("계정 위젯이 없어 자동 로그인을 진행할 수 없습니다.")
-        
-        # 작업 목록 복원
-        if 'tasks' in settings_data:
-            self.tasks = settings_data['tasks']
-            try:
-                # 작업 목록 UI 갱신 시도
-                if hasattr(self, 'update_task_list'):
-                    self.update_task_list()
-                else:
-                    self.log_message("작업 목록 UI 갱신 메서드가 없습니다.", "blue")
-            except Exception as e:
-                self.log_message(f"작업 목록 UI 갱신 중 오류 발생: {str(e)}", "red")
-                # 오류가 발생해도 계속 진행
+                    print("API 키가 비어 있습니다.")
             
-        # 작업 설정 적용
-        if 'task_settings' in settings_data:
-            task_settings = settings_data['task_settings']
-            try:
-                # UI 요소에 직접 값 설정하기
-                print("UI 요소에 설정값 적용 시작...")
+            # 검색 키워드 적용
+            if hasattr(self, 'keyword_input') and 'search_keywords' in task_settings:
+                self.keyword_input.setText(task_settings['search_keywords'])
+                print(f"검색 키워드 적용됨: {task_settings['search_keywords']}")
+            
+            # AI 키워드 적용
+            if hasattr(self, 'ai_keyword_input') and 'ai_keywords' in task_settings:
+                self.ai_keyword_input.setText(task_settings['ai_keywords'])
+                print(f"AI 키워드 적용됨: {task_settings['ai_keywords']}")
+            
+            # 2. 작업 목록 적용
+            tasks = settings_data.get('tasks', [])
+            
+            if tasks and len(tasks) > 0:
+                first_task = tasks[0]  # 첫 번째 작업만 사용 (UI 제한)
                 
-                # API 키 설정
-                if hasattr(self, 'api_key_input') and 'api_key' in task_settings:
-                    self.api_key_input.setText(task_settings.get('api_key', ''))
-                    print(f"API 키 설정됨: {task_settings.get('api_key', '')}")
-                
-                # AI 키워드 설정
-                if hasattr(self, 'ai_keyword_input') and 'ai_keywords' in task_settings:
-                    self.ai_keyword_input.setText(task_settings.get('ai_keywords', ''))
-                    print(f"AI 키워드 설정됨: {task_settings.get('ai_keywords', '')}")
-                
-                # 검색 키워드 설정
-                if hasattr(self, 'keyword_input') and 'search_keywords' in task_settings:
-                    self.keyword_input.setText(task_settings.get('search_keywords', ''))
-                    print(f"검색 키워드 설정됨: {task_settings.get('search_keywords', '')}")
-                
-                # 대상 설정
-                if hasattr(self, 'target_combo') and 'target' in task_settings:
-                    target = task_settings.get('target', '')
-                    index = self.target_combo.findText(target)
+                # 검색 설정 적용 (콤보 박스)
+                if hasattr(self, 'target_combo') and 'target_value' in first_task:
+                    target_value = first_task['target_value']
+                    index = self.target_combo.findData(target_value)
                     if index >= 0:
                         self.target_combo.setCurrentIndex(index)
-                        print(f"대상 설정됨: {target} (인덱스: {index})")
+                        print(f"검색 대상 적용됨: {first_task.get('target', '')}")
                 
-                # 정렬 설정
-                if hasattr(self, 'sort_combo') and 'sort_option' in task_settings:
-                    sort_option = task_settings.get('sort_option', '')
-                    index = self.sort_combo.findText(sort_option)
+                # 정렬 설정 적용
+                if hasattr(self, 'search_sort_combo') and 'sort_value' in first_task:
+                    sort_value = first_task['sort_value']
+                    index = self.search_sort_combo.findData(sort_value)
                     if index >= 0:
-                        self.sort_combo.setCurrentIndex(index)
-                        print(f"정렬 설정됨: {sort_option} (인덱스: {index})")
+                        self.search_sort_combo.setCurrentIndex(index)
+                        print(f"정렬 방식 적용됨: {first_task.get('sort_option', '')}")
                 
-                # 거래 방법 설정
-                if hasattr(self, 'trade_combo') and 'trade_method' in task_settings:
-                    trade_method = task_settings.get('trade_method', '')
-                    index = self.trade_combo.findText(trade_method)
+                # 기간 설정 적용
+                if hasattr(self, 'search_date_combo') and 'date_option' in first_task:
+                    date_option = first_task['date_option']
+                    index = self.search_date_combo.findData(date_option)
+                    if index >= 0:
+                        self.search_date_combo.setCurrentIndex(index)
+                        print(f"기간 옵션 적용됨: {date_option}")
+                
+                # 수집 개수 설정 적용
+                if hasattr(self, 'search_max_items_input') and 'max_items' in first_task:
+                    max_items = first_task['max_items']
+                    self.search_max_items_input.setValue(max_items)
+                    print(f"수집 개수 적용됨: {max_items}개")
+                
+                # 거래 방법 설정 적용
+                if hasattr(self, 'trade_combo') and 'trade_method_value' in first_task:
+                    trade_method = first_task['trade_method_value']
+                    index = self.trade_combo.findData(trade_method)
                     if index >= 0:
                         self.trade_combo.setCurrentIndex(index)
-                        print(f"거래 방법 설정됨: {trade_method} (인덱스: {index})")
+                        print(f"거래 방법 적용됨: {first_task.get('trade_method', '')}")
                 
-                # 거래 상태 설정
-                if hasattr(self, 'status_combo') and 'trade_status' in task_settings:
-                    trade_status = task_settings.get('trade_status', '')
-                    index = self.status_combo.findText(trade_status)
+                # 거래 상태 설정 적용
+                if hasattr(self, 'status_combo') and 'trade_status_value' in first_task:
+                    trade_status = first_task['trade_status_value']
+                    index = self.status_combo.findData(trade_status)
                     if index >= 0:
                         self.status_combo.setCurrentIndex(index)
-                        print(f"거래 상태 설정됨: {trade_status} (인덱스: {index})")
+                        print(f"거래 상태 적용됨: {first_task.get('trade_status', '')}")
+            
+            # 3. 계정 정보 적용
+            accounts = settings_data.get('accounts', {})
+            
+            if accounts:
+                # account_widget에 계정 목록 설정
+                if hasattr(self, 'account_widget'):
+                    account_id = next(iter(accounts.keys()), '')
+                    account_data = accounts.get(account_id, {})
+                    password = account_data.get('pw', '')
+                    
+                    # 로그인 필드에 정보 설정
+                    self.account_widget.id_input.setText(account_id)
+                    self.account_widget.pw_input.setText(password)
+                    
+                    print(f"계정 정보 적용됨: {account_id}")
+            
+            # 작업 설정이 성공적으로 적용됨
+            return True
                 
-                print("UI 요소에 설정값 적용 완료")
-                
-                # 레거시 코드: monitor_widget 속성이 있는 경우 (이전 호환성 유지)
-                if hasattr(self, 'monitor_widget'):
-                    # 모니터 위젯에 설정 적용
-                    if hasattr(self.monitor_widget, 'load_settings'):
-                        self.monitor_widget.load_settings(task_settings)
-                    else:
-                        self.log_message("모니터 위젯에 load_settings 메서드가 없습니다.", "blue")
-                else:
-                    self.log_message("monitor_widget 속성이 없습니다.", "blue")
-            except Exception as e:
-                self.log_message(f"설정 적용 중 오류 발생: {str(e)}", "red")
-                print(f"설정 적용 오류 상세 정보: {e}")
-                # 오류가 발생해도 계속 진행
-        
-        self.log_message("설정이 성공적으로 적용되었습니다.", "green")
-        return True
+        except Exception as e:
+            print(f"설정 적용 중 오류 발생: {str(e)}")
+            return False
 
     def on_login_progress(self, message, color):
         """로그인 진행상황 업데이트"""
         self.log.add_log(message, color)
-        self.monitor_widget.add_log_message({'message': message, 'color': color})
-    
-    def on_account_login_finished(self, success, headers, account_id):
-        """계정 선택 시 로그인 완료 처리"""
-        if success:
-            # 계정 정보에 헤더 설정
-            self.accounts[account_id]['headers'] = headers
-            
-            # 카페 목록 로드
-            self.load_cafe_list(account_id, headers)
-            
-            self.log.info(f'계정 {account_id} 로그인 성공')
-        else:
-            self.log.error(f'계정 {account_id} 로그인 실패')
-            QMessageBox.warning(self, '로그인 실패', f'계정 "{account_id}"의 로그인에 실패했습니다.\n다른 계정을 선택해주세요.')
-
-    def add_account_to_list(self, account_id, password):
-        """계정 목록에 계정 추가 (단일 계정만 관리)"""
-        # 기존 계정 정보 초기화 (단일 계정만 관리하므로 모든 계정 삭제)
-        self.accounts = {}
-        
-        # 새 계정 정보 설정
-        self.accounts[account_id] = {
-            'pw': password,
-            'headers': None,
-            'cafe_list': []
-        }
-        
-        self.log.info(f'계정 설정됨: {account_id}')
-
-    def on_login_success(self, headers):
-        """로그인 성공 시 호출 (AccountWidget에서 발생한 시그널)"""
-        # 현재 계정 ID 가져오기
-        account_id = self.account_widget.current_account
-        
-        if account_id:
-            # 계정 정보에 헤더 설정
-            if account_id in self.accounts:
-                self.accounts[account_id]['headers'] = headers
-                self.log.info(f'계정 로그인 성공: {account_id}')
-            else:
-                # 계정이 없는 경우 새로 추가
-                self.accounts[account_id] = {
-                    'pw': '',  # 비밀번호는 저장하지 않음
-                    'headers': headers
-                }
-                self.log.info(f'새 계정 추가 및 로그인 성공: {account_id}')
-            
-            # 작업 수행 가능 상태로 UI 업데이트
-            # self.monitor_widget.add_log_message({
-            #     'message': f'계정 {account_id} 로그인 성공. 이제 작업을 추가할 수 있습니다.',
-            #     'color': 'green'
-            # })
+        self.routine_tab.add_log_message({'message': message, 'color': color})
 
     def on_task_error(self, task, error_msg):
         """작업 오류 발생 시 호출되는 메서드"""
         # 작업 오류 로그 추가
-        self.monitor_widget.add_log_message({
+        self.routine_tab.add_log_message({
             'message': f"작업 오류: ID {task.get('id', '알 수 없음')}, 상태: {task.get('status', '알 수 없음')}",
             'color': 'red'
         })
         
         # 오류 메시지 로깅
-        self.monitor_widget.add_log_message({
+        self.routine_tab.add_log_message({
             'message': f"오류 내용: {error_msg}",
             'color': 'red'
         })
@@ -1376,14 +1389,69 @@ class MainWindow(QMainWindow):
         task_id = task.get('id', '알 수 없음')
         task_status = task.get('status', '알 수 없음')
         
-        self.monitor_widget.add_log_message({
+        self.routine_tab.add_log_message({
             'message': f"작업 #{task_id} 상태 변경: {task_status}",
             'color': 'blue'
         })
 
     def on_log_message(self, message_data):
         """Worker에서 전송한 로그 메시지 처리"""
-        self.monitor_widget.add_log_message(message_data)
+        self.routine_tab.add_log_message(message_data)
+        
+    def on_post_found(self, post_info):
+        """Worker에서 게시글 발견 시 호출되는 메서드
+        
+        Args:
+            post_info (dict): 게시글 정보
+                - no (int): 게시글 번호
+                - id (str): 카페 ID
+                - content (str): 게시글 제목/내용
+                - url (str): 게시글 URL
+        """
+        # 게시글 발견 로그 추가
+        self.log_message(f"🔍 게시글 발견: {post_info.get('content', '')[:30]}...", "green")
+        
+        # 모니터 위젯에 게시글 정보 추가
+        try:
+            # 현재 테이블에 행 추가
+            row = self.routine_tab.task_monitor.rowCount()
+            self.routine_tab.task_monitor.insertRow(row)
+            
+            # 아이템 생성
+            no_item = QTableWidgetItem(str(post_info.get('no', row + 1)))
+            id_item = QTableWidgetItem(post_info.get('id', ''))
+            content_item = QTableWidgetItem(post_info.get('content', ''))
+            url_item = QTableWidgetItem(post_info.get('url', ''))
+            
+            # 아이템 설정
+            self.routine_tab.task_monitor.setItem(row, 0, no_item)
+            self.routine_tab.task_monitor.setItem(row, 1, id_item)
+            self.routine_tab.task_monitor.setItem(row, 2, content_item)
+            self.routine_tab.task_monitor.setItem(row, 3, url_item)
+            
+            # URL 스타일 적용
+            self.routine_tab.on_post_added(row)
+            
+        except Exception as e:
+            self.log.error(f"게시글 정보 추가 중 오류 발생: {str(e)}")
+            print(f"게시글 정보 추가 오류: {str(e)}")
+            
+            # 새로 추가된 행으로 스크롤
+            self.routine_tab.task_monitor.scrollToBottom()
+        except Exception as e:
+            self.log_message(f"모니터 위젯에 게시글 정보 추가 중 오류 발생: {str(e)}", "red")
+            
+    def on_next_task_info(self, info):
+        """다음 작업 정보 업데이트 처리
+        
+        Args:
+            info (dict): 다음 작업 정보
+        """
+        try:
+            if hasattr(self, 'routine_tab'):
+                self.routine_tab.update_next_task_info(info)
+        except Exception as e:
+            self.log_message(f"다음 작업 정보 업데이트 중 오류 발생: {str(e)}", "red")
         
     def on_post_completed(self, post_info):
         """댓글 등록 완료 시 호출되는 메서드
@@ -1396,16 +1464,13 @@ class MainWindow(QMainWindow):
                 - url (str): 게시글 URL
         """
         # 댓글 정보 로그 추가
-        self.on_log_message({
-            'message': f"📝 댓글 등록 완료: {post_info.get('account_id')} - {post_info.get('content', '')[:30]}...",
-            'color': 'green'
-        })
+        self.log_message(f"📝 댓글 등록 완료: {post_info.get('account_id')} - {post_info.get('content', '')[:30]}...", "green")
         
         # 모니터 위젯에 댓글 정보 추가
         try:
             # 현재 테이블에 행 추가
-            row = self.monitor_widget.task_monitor.rowCount()
-            self.monitor_widget.task_monitor.insertRow(row)
+            row = self.routine_tab.task_monitor.rowCount()
+            self.routine_tab.task_monitor.insertRow(row)
             
             # 아이템 생성
             no_item = QTableWidgetItem(str(row + 1))
@@ -1414,48 +1479,25 @@ class MainWindow(QMainWindow):
             url_item = QTableWidgetItem(post_info.get('url', ''))
             
             # 아이템 설정
-            self.monitor_widget.task_monitor.setItem(row, 0, no_item)
-            self.monitor_widget.task_monitor.setItem(row, 1, id_item)
-            self.monitor_widget.task_monitor.setItem(row, 2, content_item)
-            self.monitor_widget.task_monitor.setItem(row, 3, url_item)
+            self.routine_tab.task_monitor.setItem(row, 0, no_item)
+            self.routine_tab.task_monitor.setItem(row, 1, id_item)
+            self.routine_tab.task_monitor.setItem(row, 2, content_item)
+            self.routine_tab.task_monitor.setItem(row, 3, url_item)
+            
+            # URL 스타일 적용
+            if hasattr(self.routine_tab, 'create_url_widget') and post_info.get('url'):
+                url_widget = self.routine_tab.create_url_widget(post_info.get('url'))
+                self.routine_tab.task_monitor.setCellWidget(row, 3, url_widget)
             
             # 새로 추가된 행으로 스크롤
-            self.monitor_widget.task_monitor.scrollToBottom()
+            self.routine_tab.task_monitor.scrollToBottom()
         except Exception as e:
-            self.on_log_message({
-                'message': f"모니터 위젯에 댓글 정보 추가 중 오류 발생: {str(e)}",
-                'color': 'red'
-            })
+            self.log_message(f"모니터 위젯에 댓글 정보 추가 중 오류 발생: {str(e)}", "red")
 
     def set_ai_api_key(self, api_key):
-        """AI API 키 설정
-        
-        Args:
-            api_key (str): API 키
-        """
+        """AI API 키 설정 메서드"""
         self.ai_api_key = api_key
         self.log.info("AI API 키가 설정되었습니다.")
-
-    def on_next_task_info(self, info):
-        """다음 작업 정보 수신 시 호출되는 메서드
-        
-        Args:
-            info (dict): 다음 작업 정보
-                - next_task_number (int): 다음 작업 번호
-                - next_execution_time (str): 다음 실행 시간
-                - wait_time (str): 대기 시간
-                - current_task (dict): 현재 작업 정보
-                    - task_id (str): 작업 ID
-                    - cafe_name (str): 카페 이름
-                    - board_name (str): 게시판 이름
-                    - article_title (str): 게시글 제목
-                    - article_id (str): 게시글 ID
-                    - account_id (str): 계정 ID
-                    - progress (str): 진행 상황
-                    - action (str): 작업 종류
-        """
-        # 모니터 위젯에 다음 작업 정보 표시
-        self.monitor_widget.update_next_task_info(info)
 
     def on_all_tasks_completed(self, is_normal_completion):
         """모든 작업이 완료되었을 때 호출되는 메서드
@@ -1465,13 +1507,13 @@ class MainWindow(QMainWindow):
         """
         # 작업 완료 로그 추가
         if is_normal_completion:
-            self.monitor_widget.add_log_message({
+            self.routine_tab.add_log_message({
                 'message': "[작업 완료] 모든 작업이 정상적으로 완료되었습니다.",
                 'color': 'green'
             })
             
             # 작업 반복 모드 확인
-            repeat_mode = self.monitor_widget.repeat_checkbox.isChecked()
+            repeat_mode = self.routine_tab.repeat_checkbox.isChecked()
             self.log.info(f"작업 반복 모드: {repeat_mode}")
             
             # 작업 리스트가 비어있는지 확인
@@ -1489,7 +1531,7 @@ class MainWindow(QMainWindow):
                 # 대기 시간 계산 (5초 후 재시작)
                 wait_time = 5
                 self.log.info(f"{wait_time}초 후 작업을 다시 시작합니다.")
-                self.monitor_widget.add_log_message({
+                self.routine_tab.add_log_message({
                     'message': f"[작업 반복] {wait_time}초 후 작업을 다시 시작합니다.",
                     'color': 'blue'
                 })
@@ -1499,12 +1541,12 @@ class MainWindow(QMainWindow):
                 return
             elif repeat_mode and not self.tasks:
                 self.log.info("작업 반복 모드가 활성화되어 있지만, 작업 리스트가 비어있어 재시작하지 않습니다.")
-                self.monitor_widget.add_log_message({
+                self.routine_tab.add_log_message({
                     'message': "[작업 반복 중지] 작업 리스트가 비어있어 반복 실행을 중지합니다.",
                     'color': 'red'
                 })
         else:
-            self.monitor_widget.add_log_message({
+            self.routine_tab.add_log_message({
                 'message': "[작업 중지] 작업이 중간에 중지되었습니다.",
                 'color': 'yellow'
             })
@@ -1525,11 +1567,11 @@ class MainWindow(QMainWindow):
                 del self.worker
         
         # 실행 버튼 상태 변경 (이미 변경되지 않은 경우에만)
-        if self.monitor_widget.is_running:
+        if self.routine_tab.is_running:
             self.log.info("실행 버튼으로 변경합니다.")
-            self.monitor_widget.is_running = False  # 직접 상태 변경
-            self.monitor_widget.execute_btn.setText("실행")
-            self.monitor_widget.execute_btn.setStyleSheet("""
+            self.routine_tab.is_running = False  # 직접 상태 변경
+            self.routine_tab.execute_btn.setText("실행")
+            self.routine_tab.execute_btn.setStyleSheet("""
                 QPushButton {
                     background-color: #4CAF50;
                     color: white;
@@ -1543,12 +1585,12 @@ class MainWindow(QMainWindow):
                     background-color: #45a049;
                 }
             """)
-            self.log.info(f"버튼 상태 변경 완료: is_running = {self.monitor_widget.is_running}")
+            self.log.info(f"버튼 상태 변경 완료: is_running = {self.routine_tab.is_running}")
         else:
             self.log.info("버튼이 이미 실행 상태입니다. 상태 변경이 필요하지 않습니다.")
             
         # 다음 작업 정보 초기화
-        self.monitor_widget.next_task_label.setText("대기 중...")
+        self.routine_tab.next_task_label.setText("대기 중...")
         self.log.info("다음 작업 정보가 초기화되었습니다.")
 
     def restart_tasks(self):
@@ -1647,7 +1689,7 @@ class MainWindow(QMainWindow):
         # 로그 메시지
         msg = f'작업 추가됨: 계정 {account_id}'
         self.log.info(msg)
-        self.monitor_widget.add_log_message({'message': msg, 'color': 'blue'})
+        self.routine_tab.add_log_message({'message': msg, 'color': 'blue'})
         
         # 작업 추가 성공 메시지
         QMessageBox.information(self, '작업 추가 완료', f'작업 #{task_id}이(가) 성공적으로 추가되었습니다.')
@@ -1719,23 +1761,23 @@ class MainWindow(QMainWindow):
         
         if reply == QMessageBox.Yes:
             # 작업 설정 초기화
-            self.monitor_widget.min_interval.setValue(5)
-            self.monitor_widget.max_interval.setValue(15)
-            self.monitor_widget.repeat_checkbox.setChecked(True)
-            self.monitor_widget.ip_tethering_checkbox.setChecked(False)
-            self.monitor_widget.api_key_input.clear()
+            self.routine_tab.min_interval.setValue(5)
+            self.routine_tab.max_interval.setValue(15)
+            self.routine_tab.repeat_checkbox.setChecked(True)
+            self.routine_tab.ip_tethering_checkbox.setChecked(False)
+            self.routine_tab.api_key_input.clear()
             
             self.log.info("설정이 초기화되었습니다.")
             QMessageBox.information(self, "알림", "설정이 초기화되었습니다.")
 
     def remove_task(self):
         """선택된 작업 삭제"""
-        if not self.monitor_widget.task_list.currentItem():
+        if not self.routine_tab.task_list.currentItem():
             QMessageBox.warning(self, '경고', '삭제할 작업을 선택해주세요.')
             return
             
-        current_item = self.monitor_widget.task_list.currentItem()
-        task_idx = self.monitor_widget.task_list.currentRow()
+        current_item = self.routine_tab.task_list.currentItem()
+        task_idx = self.routine_tab.task_list.currentRow()
         
         # 작업 ID 확인 (UserRole에 저장된 데이터)
         task_id = current_item.data(Qt.UserRole)
@@ -1761,7 +1803,7 @@ class MainWindow(QMainWindow):
             # 로그 메시지
             msg = f'작업 #{task_id} 삭제됨: 계정 {account_id}'
             self.log.info(msg)
-            self.monitor_widget.add_log_message({'message': msg, 'color': 'blue'})
+            self.routine_tab.add_log_message({'message': msg, 'color': 'blue'})
 
     def validate_api_key(self):
         """API 키 검증"""
@@ -1802,42 +1844,101 @@ class MainWindow(QMainWindow):
         # 검증 완료 후 UI 업데이트
         self.validate_api_btn.setEnabled(True)
 
-    def run_tasks(self, is_manual_run):
-        """작업을 실행하는 메서드"""
-        self.log.info("작업을 실행합니다.")
+    def run_tasks(self, is_running):
+        """작업을 실행하는 메서드
         
-        # 작업 실행 전 상태 체크
-        if not self.monitor_widget.is_running:
-            self.log.info("작업을 실행할 수 있는 상태입니다.")
-            
-            # 작업 실행
-            self.monitor_widget.is_running = True
-            self.monitor_widget.execute_btn.setText("중지")
-            self.monitor_widget.execute_btn.setStyleSheet("""
-                QPushButton {
-                    background-color: #d65c5c;
-                    color: white;
-                    border: none;
-                    border-radius: 4px;
-                    padding: 10px;
-                    font-size: 14px;
-                    min-height: 40px;
+        Args:
+            is_running (bool): 작업 실행 상태 (True: 실행, False: 중지)
+        """
+        try:
+            if is_running:
+                self.log.info("작업을 시작합니다.")
+                
+                # 필수 값 검증
+                if not hasattr(self, 'account_headers') or not self.account_headers:
+                    self.log.error("로그인된 계정 정보가 없습니다. 계정을 로그인해주세요.")
+                    QMessageBox.warning(self, "계정 필요", "작업을 시작하려면 계정으로 로그인해야 합니다.\n좌측의 계정 관리 영역에서 로그인을 진행해주세요.")
+                    self.routine_tab.toggle_execution()  # 상태 되돌림
+                    return
+                
+                search_keyword = self.keyword_input.text().strip()
+                if not search_keyword:
+                    self.log.error("검색 키워드가 입력되지 않았습니다.")
+                    QMessageBox.warning(self, "검색 키워드 필요", "검색할 키워드를 입력해주세요.")
+                    self.routine_tab.toggle_execution()  # 상태 되돌림
+                    return
+                
+                api_key = self.api_key_input.text().strip()
+                if not api_key:
+                    self.log.error("OpenAI API 키가 입력되지 않았습니다.")
+                    QMessageBox.warning(self, "API 키 필요", "OpenAI API 키를 입력해주세요.\n이 키는 AI 분석에 필요합니다.")
+                    self.routine_tab.toggle_execution()  # 상태 되돌림
+                    return
+                
+                # 기존 Worker 종료
+                if hasattr(self, 'worker') and self.worker.isRunning():
+                    self.worker.stop()
+                    self.worker.wait(1000)  # 최대 1초 대기
+                
+                # 검색 옵션 설정
+                options = {
+                    "max_items": self.search_max_items_input.value() if hasattr(self, 'search_max_items_input') else 100,
+                    "cafe_where": self.target_combo.currentData() if hasattr(self, 'target_combo') else "articleg",
+                    "date_option": self.search_date_combo.currentData() if hasattr(self, 'search_date_combo') else 2,
+                    "sort": self.search_sort_combo.currentData() if hasattr(self, 'search_sort_combo') else "rel",
+                    "page_delay": 1,  # 페이지 간 딜레이 (기본값: 1초)
+                    "ai_filter_command": self.ai_filter_input.toPlainText().strip() if hasattr(self, 'ai_filter_input') else ""
                 }
-                QPushButton:hover {
-                    background-color: #b84a4a;
-                }
-            """)
-            
-            self.log.info("작업이 성공적으로 실행되었습니다.")
-        else:
-            self.log.info("작업이 이미 실행 중입니다. 상태 변경이 필요하지 않습니다.")
+                
+                # AI 필터링 명령이 없으면 저장된 AI 키워드를 사용
+                if not options["ai_filter_command"] and hasattr(self, 'ai_keyword_input'):
+                    ai_keywords = self.ai_keyword_input.text().strip()
+                    if ai_keywords:
+                        options["ai_filter_command"] = ai_keywords
+                        self.log.info(f"AI 분석 필터 설정: {ai_keywords}")
+                
+                self.log.info(f"검색 설정: 키워드={search_keyword}, 대상={options['cafe_where']}, 정렬={options['sort']}, 기간={options['date_option']}")
+                if options["ai_filter_command"]:
+                    self.log.info(f"AI 필터링 명령: {options['ai_filter_command']}")
+                
+                # Worker 생성 및 시작
+                self.worker = Worker(
+                    headers=self.account_headers,
+                    search_keyword=search_keyword,
+                    api_key=api_key,
+                    options=options
+                )
+                
+                # 시그널 연결
+                self.worker.log_message.connect(self.on_log_message)
+                self.worker.post_found.connect(self.on_post_found)
+                self.worker.next_task_info.connect(self.on_next_task_info)
+                
+                # Worker 실행
+                self.worker.start()
+                self.log.info("작업이 시작되었습니다.")
+                
+            else:
+                # 작업 중지
+                self.log.info("작업을 중지합니다.")
+                
+                if hasattr(self, 'worker') and self.worker.isRunning():
+                    self.worker.stop()
+                    self.log.info("Worker에 중지 신호를 보냈습니다.")
+                else:
+                    self.log.info("실행 중인 Worker가 없습니다.")
+                
+        except Exception as e:
+            self.log.error(f"작업 실행 중 오류 발생: {str(e)}")
+            QMessageBox.critical(self, "작업 오류", f"작업 실행 중 오류가 발생했습니다:\n{str(e)}")
+            if hasattr(self, 'routine_tab') and self.routine_tab.is_running:
+                self.routine_tab.toggle_execution()  # 오류 발생 시 상태 되돌림
 
     def update_task_list(self):
         """작업 목록 UI 업데이트"""
         try:
             # task_group_layout 속성이 있는지 확인
             if not hasattr(self, 'task_group_layout'):
-                print("작업 목록 업데이트 실패: task_group_layout 속성이 없습니다.")
                 return
                 
             # 이전 작업 위젯 모두 제거
@@ -1852,12 +1953,10 @@ class MainWindow(QMainWindow):
 
             # 작업이 없는 경우 처리
             if not self.tasks or len(self.tasks) == 0:
-                print("불러온 작업이 없습니다.")
                 return
 
             # TaskListItem 클래스가 정의되어 있는지 확인
             if not 'TaskListItem' in globals():
-                print("작업 목록 업데이트 실패: TaskListItem 클래스를 찾을 수 없습니다.")
                 return
                 
             # 작업 항목 추가
@@ -1874,36 +1973,46 @@ class MainWindow(QMainWindow):
                     self.task_group_layout.addWidget(task_item)
                     self.task_items.append(task_item)
                 except Exception as e:
-                    print(f"작업 항목 {i+1} 추가 중 오류: {str(e)}")
-
-            print(f"{len(self.tasks)}개의 작업이 로드되었습니다.")
+                    pass
         except Exception as e:
-            print(f"작업 목록 업데이트 중 오류 발생: {str(e)}")
             # 오류 발생 시 빈 작업 목록으로 초기화하지 않고 유지
-            # 기존 self.tasks = [] 코드 제거
+            pass
 
     def log_message(self, message, color="white"):
-        """로그 메시지 출력 (monitor_widget이 없는 경우에도 사용 가능)"""
-        # 콘솔에 출력
-        if color == "red":
-            print(f"[오류] {message}")
-        elif color == "green":
-            print(f"[성공] {message}")
-        elif color == "blue":
-            print(f"[정보] {message}")
-        else:
-            print(f"[로그] {message}")
-            
+        """로그 메시지 출력 (routine_tab이 없는 경우에도 사용 가능)"""
         # log 속성이 있으면 log 객체에 추가
         if hasattr(self, 'log'):
             try:
                 self.log.add_log(message, color)
             except Exception as e:
-                print(f"로그 추가 중 오류: {str(e)}")
+                pass
                 
-        # monitor_widget이 있으면 UI에도 표시
-        if hasattr(self, 'monitor_widget'):
+        # routine_tab이 있으면 UI에도 표시
+        if hasattr(self, 'routine_tab'):
             try:
-                self.monitor_widget.add_log_message({'message': message, 'color': color})
+                self.routine_tab.add_log_message({'message': message, 'color': color})
             except Exception as e:
-                print(f"UI 로그 추가 중 오류: {str(e)}")
+                pass
+
+    def on_tab_changed(self, index):
+        """탭 전환 시 호출되는 메서드"""
+        self.log.info(f"탭이 {index}로 변경되었습니다.")
+
+    def on_login_success(self, headers):
+        """로그인 성공 시 호출되는 메서드"""
+        # Worker에서 사용할 account_headers 설정
+        self.account_headers = headers
+        self.log.info("로그인 성공: 작업용 계정 헤더가 설정되었습니다.")
+        
+    def add_account_to_list(self, account_id, password):
+        """계정 목록에 계정 추가"""
+        # 계정 정보 설정
+        if not hasattr(self, 'accounts'):
+            self.accounts = {}
+            
+        self.accounts[account_id] = {
+            'pw': password,
+            'headers': None
+        }
+        
+        self.log.info(f"계정 {account_id}이(가) 추가되었습니다.")
