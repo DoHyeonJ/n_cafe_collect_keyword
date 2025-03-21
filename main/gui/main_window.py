@@ -848,8 +848,8 @@ class MainWindow(QMainWindow):
         max_items_label = QLabel("수집 개수:")
         max_items_label.setStyleSheet("color: white;")
         self.search_max_items_input = QSpinBox()
-        self.search_max_items_input.setMinimum(10)
-        self.search_max_items_input.setMaximum(500)
+        self.search_max_items_input.setMinimum(1)
+        self.search_max_items_input.setMaximum(10000)
         self.search_max_items_input.setValue(100)
         self.search_max_items_input.setSingleStep(10)
         self.search_max_items_input.setStyleSheet("""
@@ -1507,45 +1507,13 @@ class MainWindow(QMainWindow):
         """
         # 작업 완료 로그 추가
         if is_normal_completion:
+            self.log.info("[작업 완료] 모든 작업이 정상적으로 완료되었습니다.")
             self.routine_tab.add_log_message({
                 'message': "[작업 완료] 모든 작업이 정상적으로 완료되었습니다.",
                 'color': 'green'
             })
-            
-            # 작업 반복 모드 확인
-            repeat_mode = self.routine_tab.repeat_checkbox.isChecked()
-            self.log.info(f"작업 반복 모드: {repeat_mode}")
-            
-            # 작업 리스트가 비어있는지 확인
-            if repeat_mode and self.tasks:
-                self.log.info("작업 반복 모드가 활성화되어 있습니다. 작업을 다시 시작합니다.")
-                
-                # Worker 상태 정리
-                if hasattr(self, 'worker'):
-                    self.log.info("기존 Worker 객체를 정리합니다.")
-                    self.worker.is_running = False
-                    if self.worker.isRunning():
-                        self.worker.wait(1000)
-                    del self.worker
-                
-                # 대기 시간 계산 (5초 후 재시작)
-                wait_time = 5
-                self.log.info(f"{wait_time}초 후 작업을 다시 시작합니다.")
-                self.routine_tab.add_log_message({
-                    'message': f"[작업 반복] {wait_time}초 후 작업을 다시 시작합니다.",
-                    'color': 'blue'
-                })
-                
-                # 타이머를 사용하여 일정 시간 후 작업 재시작
-                QTimer.singleShot(wait_time * 1000, self.restart_tasks)
-                return
-            elif repeat_mode and not self.tasks:
-                self.log.info("작업 반복 모드가 활성화되어 있지만, 작업 리스트가 비어있어 재시작하지 않습니다.")
-                self.routine_tab.add_log_message({
-                    'message': "[작업 반복 중지] 작업 리스트가 비어있어 반복 실행을 중지합니다.",
-                    'color': 'red'
-                })
         else:
+            self.log.info("[작업 중지] 작업이 중간에 중지되었습니다.")
             self.routine_tab.add_log_message({
                 'message': "[작업 중지] 작업이 중간에 중지되었습니다.",
                 'color': 'yellow'
@@ -1590,8 +1558,9 @@ class MainWindow(QMainWindow):
             self.log.info("버튼이 이미 실행 상태입니다. 상태 변경이 필요하지 않습니다.")
             
         # 다음 작업 정보 초기화
-        self.routine_tab.next_task_label.setText("대기 중...")
-        self.log.info("다음 작업 정보가 초기화되었습니다.")
+        if hasattr(self.routine_tab, 'next_task_label'):
+            self.routine_tab.next_task_label.setText("대기 중...")
+            self.log.info("다음 작업 정보가 초기화되었습니다.")
 
     def restart_tasks(self):
         """작업을 다시 시작하는 메서드 (작업 반복 모드에서 사용)"""
@@ -1861,6 +1830,7 @@ class MainWindow(QMainWindow):
                     self.routine_tab.toggle_execution()  # 상태 되돌림
                     return
                 
+                # 현재 UI에서 직접 값을 가져옴
                 search_keyword = self.keyword_input.text().strip()
                 if not search_keyword:
                     self.log.error("검색 키워드가 입력되지 않았습니다.")
@@ -1880,26 +1850,41 @@ class MainWindow(QMainWindow):
                     self.worker.stop()
                     self.worker.wait(1000)  # 최대 1초 대기
                 
-                # 검색 옵션 설정
+                # 옵션 설정
+                # 검색 대상
+                target_combo_data = None
+                if hasattr(self, 'target_combo'):
+                    target_combo_data = self.target_combo.currentData()
+                
+                # 정렬 방식
+                sort_option = "rel"
+                if hasattr(self, 'search_sort_combo'):
+                    sort_option = self.search_sort_combo.currentData()
+                
+                # 검색 기간
+                date_option = 0
+                if hasattr(self, 'search_date_combo'):
+                    date_option = self.search_date_combo.currentData()
+                
+                # 최대 수집 개수
+                max_items = 100
+                if hasattr(self, 'search_max_items_input'):
+                    max_items = self.search_max_items_input.value()
+                
+                # AI 분석 명령
+                ai_filter_command = ""
+                if hasattr(self, 'ai_keyword_input'):  # ai_keyword_input 사용
+                    ai_filter_command = self.ai_keyword_input.text().strip()
+                    self.log.info(f"AI 필터링 명령: {ai_filter_command}")
+                
                 options = {
-                    "max_items": self.search_max_items_input.value() if hasattr(self, 'search_max_items_input') else 100,
-                    "cafe_where": self.target_combo.currentData() if hasattr(self, 'target_combo') else "articleg",
-                    "date_option": self.search_date_combo.currentData() if hasattr(self, 'search_date_combo') else 2,
-                    "sort": self.search_sort_combo.currentData() if hasattr(self, 'search_sort_combo') else "rel",
-                    "page_delay": 1,  # 페이지 간 딜레이 (기본값: 1초)
-                    "ai_filter_command": self.ai_filter_input.toPlainText().strip() if hasattr(self, 'ai_filter_input') else ""
+                    "cafe_where": target_combo_data,
+                    "sort": sort_option,
+                    "date_option": date_option,
+                    "max_items": max_items,
+                    "page_delay": 1,
+                    "ai_filter_command": ai_filter_command
                 }
-                
-                # AI 필터링 명령이 없으면 저장된 AI 키워드를 사용
-                if not options["ai_filter_command"] and hasattr(self, 'ai_keyword_input'):
-                    ai_keywords = self.ai_keyword_input.text().strip()
-                    if ai_keywords:
-                        options["ai_filter_command"] = ai_keywords
-                        self.log.info(f"AI 분석 필터 설정: {ai_keywords}")
-                
-                self.log.info(f"검색 설정: 키워드={search_keyword}, 대상={options['cafe_where']}, 정렬={options['sort']}, 기간={options['date_option']}")
-                if options["ai_filter_command"]:
-                    self.log.info(f"AI 필터링 명령: {options['ai_filter_command']}")
                 
                 # Worker 생성 및 시작
                 self.worker = Worker(
@@ -1909,10 +1894,14 @@ class MainWindow(QMainWindow):
                     options=options
                 )
                 
+                # Worker의 routine_tab 설정 (중복 검사를 위해)
+                self.worker.routine_tab = self.routine_tab
+                
                 # 시그널 연결
                 self.worker.log_message.connect(self.on_log_message)
                 self.worker.post_found.connect(self.on_post_found)
                 self.worker.next_task_info.connect(self.on_next_task_info)
+                self.worker.tasks_completed.connect(self.on_all_tasks_completed)
                 
                 # Worker 실행
                 self.worker.start()

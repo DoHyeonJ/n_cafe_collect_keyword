@@ -11,6 +11,7 @@ class Worker(QThread):
     log_message = pyqtSignal(dict)  # 로그 메시지 시그널
     post_found = pyqtSignal(dict)   # 게시글 발견 시그널
     next_task_info = pyqtSignal(dict)  # 다음 작업 정보 시그널
+    tasks_completed = pyqtSignal(bool)  # 작업 완료 시그널 (True: 정상 완료, False: 오류/취소)
     
     def __init__(self, headers=None, search_keyword=None, api_key=None, options=None):
         """
@@ -29,6 +30,7 @@ class Worker(QThread):
         self.options = options or {}
         self.is_running = False
         self.post_count = 0
+        self.collected_titles = []  # 중복 제거를 위한 제목 저장 리스트
 
     def set_headers(self, headers):
         """헤더 설정"""
@@ -60,6 +62,7 @@ class Worker(QThread):
             if not self.headers:
                 self.log_message.emit({"message": "로그인된 계정 정보가 없습니다. 계정을 먼저 로그인해주세요.", "color": "red"})
                 self.is_running = False
+                self.tasks_completed.emit(False)  # 작업 실패 시그널 발생
                 return
             else:
                 self.log_message.emit({"message": "로그인된 계정 정보가 확인되었습니다.", "color": "green"})
@@ -68,6 +71,7 @@ class Worker(QThread):
             if not self.search_keyword:
                 self.log_message.emit({"message": "검색 키워드가 설정되지 않았습니다.", "color": "red"})
                 self.is_running = False
+                self.tasks_completed.emit(False)  # 작업 실패 시그널 발생
                 return
             else:
                 self.log_message.emit({"message": f"검색 키워드: '{self.search_keyword}'", "color": "blue"})
@@ -76,6 +80,7 @@ class Worker(QThread):
             if not self.api_key:
                 self.log_message.emit({"message": "OpenAI API 키가 설정되지 않았습니다.", "color": "red"})
                 self.is_running = False
+                self.tasks_completed.emit(False)  # 작업 실패 시그널 발생
                 return
                 
             # API 키 검증
@@ -86,6 +91,7 @@ class Worker(QThread):
             if not is_valid:
                 self.log_message.emit({"message": f"API 키 검증 실패: {message}", "color": "red"})
                 self.is_running = False
+                self.tasks_completed.emit(False)  # 작업 실패 시그널 발생
                 return
             else:
                 self.log_message.emit({"message": f"API 키 검증 성공: {message}", "color": "green"})
@@ -119,6 +125,7 @@ class Worker(QThread):
             if search_results["status"] != "success":
                 self.log_message.emit({"message": "검색 결과를 가져오는데 실패했습니다.", "color": "red"})
                 self.is_running = False
+                self.tasks_completed.emit(False)  # 작업 실패 시그널 발생
                 return
                 
             total_count = search_results["total_count"]
@@ -126,6 +133,18 @@ class Worker(QThread):
             
             # CafeAPI 인스턴스 생성 (헤더 전달)
             cafe_api = CafeAPI(self.headers)
+            
+            # 기존 수집된 제목 가져오기
+            existing_titles = []
+            try:
+                from PyQt5.QtWidgets import QTableWidgetItem
+                if hasattr(self, 'routine_tab') and hasattr(self.routine_tab, 'task_monitor'):
+                    for row in range(self.routine_tab.task_monitor.rowCount()):
+                        content_item = self.routine_tab.task_monitor.item(row, 2)
+                        if content_item:
+                            existing_titles.append(content_item.text())
+            except Exception as e:
+                self.log_message.emit({"message": f"기존 게시글 확인 중 오류 발생: {str(e)}. 중복 체크를 건너뜁니다.", "color": "yellow"})
             
             # 04. 가져올 때 AI 분석 키워드가 있다면 분석 키워드로 필터해서 가져온다
             ai_filter_command = self.options.get("ai_filter_command", "")
@@ -157,6 +176,12 @@ class Worker(QThread):
                         
                         # 게시글 제목
                         title = item["title"]
+                        
+                        # 중복 게시글 확인
+                        if title in self.collected_titles or title in existing_titles:
+                            self.log_message.emit({"message": f"⚠️ 중복 게시글 건너뜀: {title}", "color": "yellow"})
+                            continue
+                            
                         self.log_message.emit({"message": f"[{idx+1}/{total_items}] 게시글 분석 중: {title}", "color": "blue"})
                         
                         # 게시글 내용
@@ -174,7 +199,7 @@ class Worker(QThread):
                         content = cafe_api.get_parse_content_html(content_html) if content_html else item["content"]
                         
                         # 내용 길이 확인
-                        content_preview = content[:100] + "..." if len(content) > 100 else content
+                        content_preview = content[:10000] + "..." if len(content) > 10000 else content
                         self.log_message.emit({"message": f"게시글 내용 미리보기: {content_preview}", "color": "gray"})
                         
                         # AI 분석 수행
@@ -205,6 +230,9 @@ class Worker(QThread):
                                 "content": title,
                                 "url": item["url"] if item["url"].startswith(("http://", "https://")) else "https://" + item["url"]
                             })
+                            
+                            # 중복 확인을 위해 수집된 제목 저장
+                            self.collected_titles.append(title)
                             
                             self.post_count += 1
                         else:
@@ -239,13 +267,24 @@ class Worker(QThread):
                         break
                         
                     try:
+                        # 제목 가져오기
+                        title = item["title"]
+                        
+                        # 중복 게시글 확인
+                        if title in self.collected_titles or title in existing_titles:
+                            self.log_message.emit({"message": f"⚠️ 중복 게시글 건너뜀: {title}", "color": "yellow"})
+                            continue
+                            
                         # 게시글 발견 시그널 발생
                         self.post_found.emit({
                             "no": self.post_count + 1,
                             "id": item["cafe_id"],
-                            "content": item["title"],
+                            "content": title,
                             "url": item["url"] if item["url"].startswith(("http://", "https://")) else "https://" + item["url"]
                         })
+                        
+                        # 중복 확인을 위해 수집된 제목 저장
+                        self.collected_titles.append(title)
                         
                         self.post_count += 1
                         
@@ -259,8 +298,12 @@ class Worker(QThread):
             # 05. 수집된 정보를 모니터에 넣는다. (시그널로 전달)
             self.log_message.emit({"message": f"작업이 완료되었습니다. 총 {self.post_count}개의 게시글이 수집되었습니다.", "color": "green"})
             
+            # 작업 완료 시그널 발생
+            self.tasks_completed.emit(True)
+            
         except Exception as e:
             self.log_message.emit({"message": f"작업 실행 중 오류 발생: {str(e)}", "color": "red"})
             self.log_message.emit({"message": traceback.format_exc(), "color": "red"})
+            self.tasks_completed.emit(False)  # 작업 실패 시그널 발생
         finally:
             self.is_running = False

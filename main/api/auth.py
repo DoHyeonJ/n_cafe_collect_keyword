@@ -51,15 +51,6 @@ class NaverAuth:
         
         if success:
             try:
-                # imgs 폴더 확인 및 생성
-                if not os.path.exists('imgs'):
-                    os.makedirs('imgs')
-                    
-                # 계정별 이미지 폴더 확인 및 생성
-                if self.username:  # username이 존재하는 경우에만 폴더 생성
-                    account_img_dir = os.path.join('imgs', self.username)
-                    if not os.path.exists(account_img_dir):
-                        os.makedirs(account_img_dir)
                 return True, self.get_headers()
             except Exception as e:
                 print(f"폴더 생성 중 오류 발생: {str(e)}")
