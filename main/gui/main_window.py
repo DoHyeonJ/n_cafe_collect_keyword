@@ -592,9 +592,9 @@ class MainWindow(QMainWindow):
         self.monitor_widget.execute_tasks_clicked.connect(self.run_tasks)
         
         # 라이선스 확인
-        if not self.check_and_create_license():
-            self.handle_missing_license()
-            return
+        # if not self.check_and_create_license():
+        #     self.handle_missing_license()
+        #     return
             
         # UI 초기화
         self.init_ui()
