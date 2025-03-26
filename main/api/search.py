@@ -25,8 +25,14 @@ class NaverCafeSearchAPI:
             self.openai_client = openai.OpenAI(api_key=openai_api_key)
         else:
             self.openai_client = None
+            
+        self.is_running = True  # 검색 중지 플래그 추가
 
-    def search(self, query, max_items=100, cafe_where='articleg', date_option=2, sort='rel', page_delay=1):
+    def stop_search(self):
+        """검색 중지"""
+        self.is_running = False
+
+    def search(self, query, max_items=100, cafe_where='articleg', date_option=2, sort='rel', page_delay=1, progress_callback=None):
         """
         네이버 카페 검색 API
         
@@ -37,6 +43,7 @@ class NaverCafeSearchAPI:
             date_option (int): 기간 옵션 (0=전체, 1=1시간, 2=1일, 3=1주, 4=1개월, 5=3개월, 6=6개월, 7=1년)
             sort (str): 정렬 방식 ('rel'=관련도순, 'date'=최신순)
             page_delay (int): 페이지 간 요청 딜레이(초) (기본값: 1초)
+            progress_callback (callable): 진행상황 콜백 함수 (추가)
         
         returns:
             dict: 검색 결과
@@ -72,8 +79,9 @@ class NaverCafeSearchAPI:
         nso = f"so:{so_options.get(sort, 'r')},p:{nso_periods.get(date_option, '1d')}"
         
         print(f"검색어 '{query}'에 대해 최대 {max_items}개 항목 수집을 시작합니다...")
+        self.is_running = True  # 검색 시작
         
-        while len(all_results) < max_items:
+        while len(all_results) < max_items and self.is_running:  # 중지 플래그 확인
             # 한 페이지의 시작 인덱스 계산
             start_index = (current_page - 1) * items_per_page + 1
             
@@ -94,6 +102,11 @@ class NaverCafeSearchAPI:
             
             try:
                 print(f"페이지 {current_page} 수집 중... (현재 {len(all_results)}개 항목)")
+                
+                # 진행상황 콜백 호출
+                if progress_callback:
+                    progress_callback(current_page, len(all_results), True)
+                
                 response = self.session.get(url, params=params, headers=self.headers)
                 response.raise_for_status()
                 
@@ -117,12 +130,21 @@ class NaverCafeSearchAPI:
                 current_page += 1
                 
                 # 과도한 요청 방지를 위한 딜레이
-                if page_delay > 0:
+                if page_delay > 0 and self.is_running:  # 중지 플래그 확인
                     time.sleep(page_delay)
                 
             except requests.RequestException as e:
                 print(f"요청 중 오류 발생: {e}")
                 return {'error': str(e), 'status': 'error', 'items': all_results}
+                
+            # 중지 플래그 확인
+            if not self.is_running:
+                print("검색이 중지되었습니다.")
+                break
+        
+        # 최종 진행상황 콜백 호출
+        if progress_callback:
+            progress_callback(current_page, len(all_results), False)
         
         return {
             'status': 'success',
@@ -293,11 +315,11 @@ if __name__ == "__main__":
     # 검색어 '사고'로 100개 항목 수집
     results = naver_api.search(
         query='사고', 
-        max_items=100,  # 최대 100개 항목 수집
+        max_items=10000,  # 최대 100개 항목 수집
         cafe_where='articleg', 
         date_option=2, 
         sort='rel',
-        page_delay=1  # 페이지 간 1초 딜레이
+        page_delay=0.5  # 페이지 간 1초 딜레이
     )
     
     # 전체 검색 결과 저장

@@ -12,6 +12,7 @@ class Worker(QThread):
     post_found = pyqtSignal(dict)   # 게시글 발견 시그널
     next_task_info = pyqtSignal(dict)  # 다음 작업 정보 시그널
     tasks_completed = pyqtSignal(bool)  # 작업 완료 시그널 (True: 정상 완료, False: 오류/취소)
+    progress_updated = pyqtSignal(dict)  # 진행상황 업데이트 시그널 (추가)
     
     def __init__(self, headers=None, search_keyword=None, api_key=None, options=None):
         """
@@ -22,6 +23,13 @@ class Worker(QThread):
             search_keyword (str): 검색 키워드
             api_key (str): OpenAI API 키
             options (dict): 검색 옵션
+                - cafe_where (str): 검색 대상
+                - sort (str): 정렬 방식
+                - date_option (int): 기간 옵션
+                - max_items (int): 최대 수집 개수
+                - page_delay (int): 페이지 간 딜레이
+                - ai_filter_command (str): AI 분석 명령어
+                - filter_keywords (list): 필터 키워드 목록 (추가됨)
         """
         super().__init__()
         self.headers = headers
@@ -31,6 +39,7 @@ class Worker(QThread):
         self.is_running = False
         self.post_count = 0
         self.collected_titles = []  # 중복 제거를 위한 제목 저장 리스트
+        self.search_api = None  # NaverCafeSearchAPI 인스턴스 저장용 (추가)
 
     def set_headers(self, headers):
         """헤더 설정"""
@@ -51,6 +60,9 @@ class Worker(QThread):
     def stop(self):
         """작업 중지"""
         self.is_running = False
+        # 검색 API 인스턴스가 있으면 중지 신호 전달 (추가)
+        if self.search_api:
+            self.search_api.stop_search()
         self.log_message.emit({"message": "작업이 중지되었습니다.", "color": "red"})
         
     def run(self):
@@ -108,17 +120,26 @@ class Worker(QThread):
             sort = self.options.get("sort", "rel")  # 기본값: 관련도순
             page_delay = self.options.get("page_delay", 1)  # 기본값: 1초
             
-            # NaverCafeSearchAPI 인스턴스 생성 (headers 전달, OpenAI API 키는 전달하지 않음)
-            search_api = NaverCafeSearchAPI()
+            # NaverCafeSearchAPI 인스턴스 생성 및 저장
+            self.search_api = NaverCafeSearchAPI()
             
-            # 검색 실행
-            search_results = search_api.search(
+            # 진행상황 초기화
+            self.progress_updated.emit({
+                "status": "검색 시작",
+                "current_page": 0,
+                "total_items": 0,
+                "progress": 0
+            })
+            
+            # 검색 실행 (콜백 함수 추가)
+            search_results = self.search_api.search(
                 query=self.search_keyword,
                 max_items=max_items,
                 cafe_where=cafe_where,
                 date_option=date_option,
                 sort=sort,
-                page_delay=page_delay
+                page_delay=page_delay,
+                progress_callback=self.update_search_progress  # 콜백 함수 추가
             )
             
             # 03. 검색된 결과를 가져온다.
@@ -148,6 +169,58 @@ class Worker(QThread):
             
             # 04. 가져올 때 AI 분석 키워드가 있다면 분석 키워드로 필터해서 가져온다
             ai_filter_command = self.options.get("ai_filter_command", "")
+            filter_keywords = self.options.get("filter_keywords", [])
+            
+            # 필터 키워드가 있는 경우, 먼저 필터 키워드로 필터링
+            if filter_keywords:
+                self.log_message.emit({"message": f"필터 키워드: {', '.join(filter_keywords)}", "color": "blue"})
+                filtered_by_keywords = []
+                
+                for item in search_results["items"]:
+                    title = item["title"].strip()
+                    content = item["content"].strip()
+                    
+                    # 제목이나 내용에 필터 키워드가 포함되어 있는지 확인
+                    for keyword in filter_keywords:
+                        keyword = keyword.strip()
+                        if keyword in title or keyword in content:
+                            self.log_message.emit({
+                                "message": f"✅ 필터 키워드 '{keyword}' 발견: {title}", 
+                                "color": "green"
+                            })
+                            
+                            # 중복 게시글 확인
+                            if title in self.collected_titles or title in existing_titles:
+                                self.log_message.emit({
+                                    "message": f"⚠️ 중복 게시글 건너뜀: {title}", 
+                                    "color": "yellow"
+                                })
+                                continue
+                            
+                            # 게시글 발견 시그널 발생
+                            self.post_found.emit({
+                                "no": self.post_count + 1,
+                                "id": item["cafe_id"],
+                                "content": title,
+                                "url": item["url"] if item["url"].startswith(("http://", "https://")) else "https://" + item["url"]
+                            })
+                            
+                            # 중복 확인을 위해 수집된 제목 저장
+                            self.collected_titles.append(title)
+                            self.post_count += 1
+                            
+                            # 필터링된 게시글 목록에 추가
+                            filtered_by_keywords.append(item)
+                            break  # 하나의 키워드라도 매칭되면 다음 게시글로
+                
+                # 필터 키워드로 필터링된 게시글을 제외한 나머지 게시글만 AI 분석 대상으로 설정
+                remaining_items = [item for item in search_results["items"] if item not in filtered_by_keywords]
+                search_results["items"] = remaining_items
+                
+                self.log_message.emit({
+                    "message": f"필터 키워드로 {len(filtered_by_keywords)}개의 게시글이 수집되었습니다.", 
+                    "color": "blue"
+                })
             
             if ai_filter_command:
                 self.log_message.emit({"message": f"AI 분석 필터: '{ai_filter_command}'로 게시글을 분석합니다.", "color": "blue"})
@@ -307,3 +380,31 @@ class Worker(QThread):
             self.tasks_completed.emit(False)  # 작업 실패 시그널 발생
         finally:
             self.is_running = False
+            # 진행상황 초기화
+            self.progress_updated.emit({
+                "status": "대기 중",
+                "current_page": 0,
+                "total_items": 0,
+                "progress": 0
+            })
+
+    def update_search_progress(self, current_page, total_items, is_searching):
+        """검색 진행상황 업데이트 콜백
+        
+        Args:
+            current_page (int): 현재 페이지 번호
+            total_items (int): 현재까지 수집된 총 항목 수
+            is_searching (bool): 검색 진행 중 여부
+        """
+        if not self.is_running:
+            return
+            
+        status = "검색 중" if is_searching else "검색 완료"
+        progress = min(int((total_items / self.options.get("max_items", 100)) * 100), 100)
+        
+        self.progress_updated.emit({
+            "status": status,
+            "current_page": current_page,
+            "total_items": total_items,
+            "progress": progress
+        })

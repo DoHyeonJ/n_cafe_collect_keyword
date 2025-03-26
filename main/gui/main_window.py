@@ -921,6 +921,32 @@ class MainWindow(QMainWindow):
         ai_layout.setContentsMargins(0, 0, 0, 0)
         ai_layout.setSpacing(10)
         
+        # 필터 키워드 설정
+        filter_keyword_widget = QWidget()
+        filter_keyword_layout = QHBoxLayout()
+        filter_keyword_layout.setContentsMargins(0, 0, 0, 0)
+        
+        filter_keyword_label = QLabel("필터 키워드:")
+        filter_keyword_label.setStyleSheet("color: white;")
+        self.filter_keyword_input = QLineEdit()
+        self.filter_keyword_input.setPlaceholderText("키워드를 쉼표(,)로 구분하여 입력하세요")
+        self.filter_keyword_input.setStyleSheet("""
+            QLineEdit {
+                background-color: #2b2b2b;
+                color: white;
+                border: 1px solid #3d3d3d;
+                padding: 8px;
+                border-radius: 4px;
+            }
+            QLineEdit:focus {
+                border: 1px solid #5c85d6;
+            }
+        """)
+        
+        filter_keyword_layout.addWidget(filter_keyword_label)
+        filter_keyword_layout.addWidget(self.filter_keyword_input)
+        filter_keyword_widget.setLayout(filter_keyword_layout)
+        
         # AI API Key 설정
         api_key_widget = QWidget()
         api_key_layout = QHBoxLayout()
@@ -991,6 +1017,7 @@ class MainWindow(QMainWindow):
         ai_keyword_widget.setLayout(ai_keyword_layout)
         
         # AI 설정 추가
+        ai_layout.addWidget(filter_keyword_widget)  # 필터 키워드 추가
         ai_layout.addWidget(api_key_widget)
         ai_layout.addWidget(ai_keyword_widget)
         ai_settings.setLayout(ai_layout)
@@ -1871,6 +1898,14 @@ class MainWindow(QMainWindow):
                 if hasattr(self, 'search_max_items_input'):
                     max_items = self.search_max_items_input.value()
                 
+                # 필터 키워드 처리
+                filter_keywords = []
+                if hasattr(self, 'filter_keyword_input'):
+                    keywords_text = self.filter_keyword_input.text().strip()
+                    if keywords_text:
+                        filter_keywords = [k.strip() for k in keywords_text.split(',') if k.strip()]
+                        self.log.info(f"필터 키워드: {', '.join(filter_keywords)}")
+                
                 # AI 분석 명령
                 ai_filter_command = ""
                 if hasattr(self, 'ai_keyword_input'):  # ai_keyword_input 사용
@@ -1883,7 +1918,8 @@ class MainWindow(QMainWindow):
                     "date_option": date_option,
                     "max_items": max_items,
                     "page_delay": 1,
-                    "ai_filter_command": ai_filter_command
+                    "ai_filter_command": ai_filter_command,
+                    "filter_keywords": filter_keywords  # 필터 키워드 추가
                 }
                 
                 # Worker 생성 및 시작
@@ -1902,6 +1938,7 @@ class MainWindow(QMainWindow):
                 self.worker.post_found.connect(self.on_post_found)
                 self.worker.next_task_info.connect(self.on_next_task_info)
                 self.worker.tasks_completed.connect(self.on_all_tasks_completed)
+                self.worker.progress_updated.connect(self.routine_tab.update_progress)  # 진행상황 시그널 연결
                 
                 # Worker 실행
                 self.worker.start()

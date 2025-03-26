@@ -1,7 +1,7 @@
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, 
                            QPushButton, QGroupBox, QLabel, QTableWidget, 
                            QHeaderView, QTableWidgetItem, QTabWidget, 
-                           QTextEdit, QMessageBox, QFileDialog)
+                           QTextEdit, QMessageBox, QFileDialog, QProgressBar)
 from PyQt5.QtCore import Qt, pyqtSignal, QUrl, QThread
 from PyQt5.QtGui import QTextOption, QDesktopServices, QColor
 from datetime import datetime
@@ -208,7 +208,60 @@ class RoutineTab(QWidget):
         # 메인 레이아웃에 위젯 추가
         layout.addWidget(button_container)
         layout.addWidget(self.task_monitor)
-        # layout.addWidget(self.next_task_label)
+        
+        # 진행상황 표시 영역 추가
+        progress_group = QGroupBox("진행상황")
+        progress_group.setStyleSheet("""
+            QGroupBox {
+                background-color: #2b2b2b;
+                border: 1px solid #3d3d3d;
+                border-radius: 4px;
+                margin-top: 10px;
+                padding: 15px;
+            }
+            QGroupBox::title {
+                color: white;
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 5px;
+            }
+        """)
+        progress_layout = QVBoxLayout()
+        
+        # 진행상황 정보 레이블
+        self.progress_info = QLabel("대기 중...")
+        self.progress_info.setStyleSheet("""
+            QLabel {
+                color: #5c85d6;
+                font-size: 13px;
+                padding: 5px;
+            }
+        """)
+        
+        # 진행률 표시 바
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setStyleSheet("""
+            QProgressBar {
+                border: 1px solid #3d3d3d;
+                border-radius: 2px;
+                text-align: center;
+                background-color: #2b2b2b;
+                height: 20px;
+            }
+            QProgressBar::chunk {
+                background-color: #5c85d6;
+                border-radius: 2px;
+            }
+        """)
+        self.progress_bar.setMinimum(0)
+        self.progress_bar.setMaximum(100)
+        self.progress_bar.setValue(0)
+        
+        progress_layout.addWidget(self.progress_info)
+        progress_layout.addWidget(self.progress_bar)
+        progress_group.setLayout(progress_layout)
+        
+        layout.addWidget(progress_group)
         layout.addWidget(self.log_monitor)
         layout.addWidget(self.execute_btn)
         self.setLayout(layout)
@@ -457,4 +510,34 @@ class RoutineTab(QWidget):
                 print(f"URL 아이템이 없거나 비어 있음: 행={row}")
         except Exception as e:
             self.log.error(f"URL 스타일 적용 중 오류 발생: {str(e)}")
-            print(f"URL 스타일 적용 오류: {str(e)}") 
+            print(f"URL 스타일 적용 오류: {str(e)}")
+
+    def update_progress(self, progress_info):
+        """진행상황 업데이트
+        
+        Args:
+            progress_info (dict): 진행상황 정보
+                - status (str): 현재 상태
+                - current_page (int): 현재 페이지
+                - total_items (int): 총 수집 항목 수
+                - progress (int): 진행률 (0-100)
+        """
+        try:
+            status = progress_info.get("status", "대기 중")
+            current_page = progress_info.get("current_page", 0)
+            total_items = progress_info.get("total_items", 0)
+            progress = progress_info.get("progress", 0)
+            
+            # 진행상황 텍스트 업데이트
+            if status == "검색 중":
+                self.progress_info.setText(f"페이지 {current_page} 수집 중... (현재 {total_items}개 항목)")
+            elif status == "검색 완료":
+                self.progress_info.setText(f"검색 완료: 총 {total_items}개 항목 수집")
+            else:
+                self.progress_info.setText(status)
+            
+            # 진행률 바 업데이트
+            self.progress_bar.setValue(progress)
+            
+        except Exception as e:
+            print(f"진행상황 업데이트 중 오류 발생: {str(e)}") 
