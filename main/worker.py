@@ -120,6 +120,12 @@ class Worker(QThread):
             sort = self.options.get("sort", "rel")  # 기본값: 관련도순
             page_delay = self.options.get("page_delay", 1)  # 기본값: 1초
             
+            # 옵션 디버깅용 로그 출력
+            self.log_message.emit({
+                "message": f"작업 설정: {self.options}", 
+                "color": "gray"
+            })
+            
             # NaverCafeSearchAPI 인스턴스 생성 및 저장
             self.search_api = NaverCafeSearchAPI()
             
@@ -171,10 +177,18 @@ class Worker(QThread):
             ai_filter_command = self.options.get("ai_filter_command", "")
             filter_keywords = self.options.get("filter_keywords", [])
             
-            # 필터 키워드가 있는 경우, 먼저 필터 키워드로 필터링
+            self.log_message.emit({
+                "message": f"총 검색된 게시글: {len(search_results['items'])}개, 필터 키워드: {filter_keywords if filter_keywords else '없음'}, AI 분석 필터: {ai_filter_command if ai_filter_command else '없음'}", 
+                "color": "blue"
+            })
+            
+            # ------------------------------------------------
+            # 04-1. 키워드 필터 - 필터 키워드가 있으면 1차 필터링 진행
+            # ------------------------------------------------
+            filtered_by_keywords = []  # 키워드 필터링된 게시글 저장
+            
             if filter_keywords:
                 self.log_message.emit({"message": f"필터 키워드: {', '.join(filter_keywords)}", "color": "blue"})
-                filtered_by_keywords = []
                 
                 for item in search_results["items"]:
                     title = item["title"].strip()
@@ -197,145 +211,265 @@ class Worker(QThread):
                                 })
                                 continue
                             
-                            # 게시글 발견 시그널 발생
-                            self.post_found.emit({
-                                "no": self.post_count + 1,
-                                "id": item["cafe_id"],
-                                "content": title,
-                                "url": item["url"] if item["url"].startswith(("http://", "https://")) else "https://" + item["url"]
-                            })
-                            
-                            # 중복 확인을 위해 수집된 제목 저장
-                            self.collected_titles.append(title)
-                            self.post_count += 1
-                            
                             # 필터링된 게시글 목록에 추가
                             filtered_by_keywords.append(item)
                             break  # 하나의 키워드라도 매칭되면 다음 게시글로
                 
-                # 필터 키워드로 필터링된 게시글을 제외한 나머지 게시글만 AI 분석 대상으로 설정
-                remaining_items = [item for item in search_results["items"] if item not in filtered_by_keywords]
-                search_results["items"] = remaining_items
-                
                 self.log_message.emit({
-                    "message": f"필터 키워드로 {len(filtered_by_keywords)}개의 게시글이 수집되었습니다.", 
+                    "message": f"필터 키워드로 {len(filtered_by_keywords)}개의 게시글이 1차 필터링되었습니다.", 
+                    "color": "blue"
+                })
+            else:
+                # 필터 키워드가 없는 경우 모든 게시글을 1차 필터 통과로 처리
+                filtered_by_keywords = search_results["items"]
+                self.log_message.emit({
+                    "message": "필터 키워드가 설정되지 않아 모든 게시글이 1차 필터를 통과했습니다.", 
                     "color": "blue"
                 })
             
-            if ai_filter_command:
-                self.log_message.emit({"message": f"AI 분석 필터: '{ai_filter_command}'로 게시글을 분석합니다.", "color": "blue"})
+            # ------------------------------------------------
+            # 04-2. AI 필터 - AI 명령어가 있으면 2차 필터링 진행
+            # ------------------------------------------------
+            if ai_filter_command and filtered_by_keywords:  # 1차 필터링된 게시글이 있는 경우에만 AI 분석 진행
+                self.log_message.emit({"message": f"AI 분석 필터: '{ai_filter_command}'로 1차 필터링된 게시글을 분석합니다.", "color": "blue"})
                 
-                # 게시글 분석 처리
-                filtered_items = []
+                # 배치 처리를 위한 크기 설정
+                batch_size = 20  # 한 번에 처리할 게시글 수
+                total_items = len(filtered_by_keywords)
                 
-                total_items = len(search_results["items"])
-                self.log_message.emit({"message": f"총 {total_items}개 게시글에 대해 AI 분석을 시작합니다.", "color": "blue"})
+                self.log_message.emit({"message": f"총 {total_items}개 게시글에 대해 AI 배치 분석을 시작합니다.", "color": "blue"})
                 
-                for idx, item in enumerate(search_results["items"]):
-                    if not self.is_running:
-                        break
+                if total_items > 0:
+                    # 1단계: 게시글 내용 수집 단계
+                    self.log_message.emit({"message": "1단계: AI 분석을 위한 게시글 내용 수집 중...", "color": "blue"})
+                    
+                    # 진행상황 초기화 - 게시글 내용 수집 시작
+                    self.progress_updated.emit({
+                        "status": "AI 분석을 위한 게시글 내용 수집 중",
+                        "current_page": 0,
+                        "total_items": 0,
+                        "progress": 0
+                    })
+                    
+                    # 분석용 게시글 준비
+                    posts_for_analysis = []
+                    
+                    # 게시글 내용 수집 (1차 필터링된 게시글만)
+                    for idx, item in enumerate(filtered_by_keywords):
+                        if not self.is_running:
+                            break
                         
-                    try:
-                        # 작업 정보 업데이트
-                        self.next_task_info.emit({
-                            "next_task_number": idx + 1,
-                            "next_execution_time": time.strftime("%Y-%m-%d %H:%M:%S"),
-                            "wait_time": "0초",
-                            "current_task": {
-                                "task_id": f"게시글_{idx+1}",
-                                "action": "AI 분석 중"
-                            }
-                        })
-                        
-                        # 게시글 제목
-                        title = item["title"]
-                        
-                        # 중복 게시글 확인
-                        if title in self.collected_titles or title in existing_titles:
-                            self.log_message.emit({"message": f"⚠️ 중복 게시글 건너뜀: {title}", "color": "yellow"})
-                            continue
+                        try:
+                            # 게시글 제목
+                            title = item["title"]
                             
-                        self.log_message.emit({"message": f"[{idx+1}/{total_items}] 게시글 분석 중: {title}", "color": "blue"})
-                        
-                        # 게시글 내용
-                        cafe_url_id = item["cafe_id"]  # URL에서 추출한 카페 값
-                        article_id = item["article_id"]
-                        
-                        # 카페 정보를 가져와서 실제 카페 ID 얻기
-                        self.log_message.emit({"message": f"카페 정보 가져오는 중: {cafe_url_id}", "color": "gray"})
-                        cafe_info = cafe_api.get_cafe_info(cafe_url_id)
-                        real_cafe_id = cafe_info["id"]  # 실제 카페 ID
-                        
-                        # 게시글 내용 가져오기
-                        self.log_message.emit({"message": f"게시글 내용 가져오는 중: {article_id}", "color": "gray"})
-                        content_html = cafe_api.get_board_content(real_cafe_id, article_id)
-                        content = cafe_api.get_parse_content_html(content_html) if content_html else item["content"]
-                        
-                        # 내용 길이 확인
-                        content_preview = content[:10000] + "..." if len(content) > 10000 else content
-                        self.log_message.emit({"message": f"게시글 내용 미리보기: {content_preview}", "color": "gray"})
-                        
-                        # AI 분석 수행
-                        self.log_message.emit({"message": f"OpenAI API 호출하여 게시글 분석 중...", "color": "blue"})
-                        analysis_result = ai_generator.analyze_post_with_command(title, content, ai_filter_command)
-                        
-                        # 분석 결과 로그 출력
-                        analysis_summary = analysis_result.get("analysis", "분석 내용 없음")
-                        matched_keywords = ", ".join(analysis_result.get("matched_keywords", []))
-                        
-                        # 분석 결과가 조건과 일치하는 경우
-                        if analysis_result["is_relevant"]:
-                            self.log_message.emit({"message": f"✅ 일치 게시글 발견: {title}", "color": "green"})
-                            self.log_message.emit({"message": f"  - 매칭된 키워드: {matched_keywords}", "color": "green"})
-                            self.log_message.emit({"message": f"  - 분석 결과: {analysis_summary}", "color": "green"})
+                            # 중복 게시글 확인
+                            if title in self.collected_titles or title in existing_titles:
+                                self.log_message.emit({"message": f"⚠️ 중복 게시글 건너뜀: {title}", "color": "yellow"})
+                                continue
                             
-                            # 게시글 정보 업데이트
-                            item["full_content"] = content
-                            item["analysis_result"] = analysis_result
-                            
-                            # 필터링된 게시글 목록에 추가
-                            filtered_items.append(item)
-                            
-                            # 게시글 발견 시그널 발생
-                            self.post_found.emit({
-                                "no": self.post_count + 1,
-                                "id": cafe_url_id,  # 원래 카페 ID 유지
-                                "content": title,
-                                "url": item["url"] if item["url"].startswith(("http://", "https://")) else "https://" + item["url"]
+                            # 진행상황 업데이트
+                            progress_pct = ((idx + 1) / total_items) * 40  # 내용 수집은 전체 진행의 40%
+                            self.progress_updated.emit({
+                                "status": "AI 분석을 위한 게시글 내용 수집 중",
+                                "current_page": 0,
+                                "total_items": idx + 1,
+                                "progress": int(progress_pct)
                             })
                             
-                            # 중복 확인을 위해 수집된 제목 저장
-                            self.collected_titles.append(title)
+                            # 게시글 내용
+                            cafe_url_id = item["cafe_id"]
+                            article_id = item["article_id"]
                             
-                            self.post_count += 1
-                        else:
-                            # 조건과 일치하지 않는 경우에도 로그 추가
-                            self.log_message.emit({"message": f"❌ 조건 불일치 게시글: {title}", "color": "gray"})
-                            self.log_message.emit({"message": f"  - 확인된 키워드: {matched_keywords}", "color": "gray"})
-                            self.log_message.emit({"message": f"  - 불일치 사유: {analysis_summary}", "color": "gray"})
+                            try:
+                                # URL에서 art 매개변수 추출
+                                url = item["url"]
+                                art_param = None
+                                if "art=" in url:
+                                    art_param = url.split("art=")[1].split("&")[0]
+                                
+                                # 카페 정보를 가져와서 실제 카페 ID 얻기
+                                cafe_info = cafe_api.get_cafe_info(cafe_url_id)
+                                real_cafe_id = cafe_info["id"]
+                                
+                                # 게시글 내용 가져오기 (art 매개변수 전달)
+                                content_html = cafe_api.get_board_content(real_cafe_id, article_id, art_param)
+                                content = cafe_api.get_parse_content_html(content_html) if content_html else item["content"]
+                            except (ConnectionResetError, ConnectionAbortedError, ConnectionRefusedError, ConnectionError) as e:
+                                self.log_message.emit({"message": f"네트워크 연결 오류 발생: {str(e)}. 재시도 중...", "color": "yellow"})
+                                # 잠시 대기 후 재시도
+                                time.sleep(5)  # 연결 오류 시 더 긴 대기 시간 (2초 → 5초)
+                                try:
+                                    # 재시도: 카페 정보
+                                    cafe_info = cafe_api.get_cafe_info(cafe_url_id)
+                                    real_cafe_id = cafe_info["id"]
+                                    
+                                    # 재시도: 게시글 내용 가져오기 (art 매개변수 전달)
+                                    content_html = cafe_api.get_board_content(real_cafe_id, article_id, art_param)
+                                    content = cafe_api.get_parse_content_html(content_html) if content_html else item["content"]
+                                    
+                                    self.log_message.emit({"message": "재시도 성공: 게시글 내용을 가져왔습니다.", "color": "green"})
+                                except Exception as retry_e:
+                                    self.log_message.emit({"message": f"재시도 실패 ({type(retry_e).__name__}): {str(retry_e)}. 기본 내용 사용", "color": "red"})
+                                    # 기본 내용 사용
+                                    content = item["content"]
+                            except Exception as e:
+                                error_type = type(e).__name__
+                                self.log_message.emit({"message": f"AI 분석용 게시글 내용 가져오기 실패 ({error_type}): {str(e)}. 기본 내용 사용", "color": "red"})
+                                # 기본 내용 사용
+                                content = item["content"]
+                            
+                            # 분석용 데이터 추가
+                            posts_for_analysis.append({
+                                'idx': idx,
+                                'item': item,
+                                'title': title,
+                                'content': content[:300] if len(content) > 300 else content,  # 내용을 300자로 제한
+                                'cafe_url_id': cafe_url_id
+                            })
+                            
+                            # 로그 메시지
+                            if (idx + 1) % 10 == 0 or idx + 1 == total_items:
+                                self.log_message.emit({
+                                    "message": f"AI 분석을 위한 게시글 내용 수집 중: {idx + 1}/{total_items}", 
+                                    "color": "blue"
+                                })
+                            
+                        except Exception as e:
+                            self.log_message.emit({"message": f"AI 분석을 위한 게시글 내용 수집 중 오류 발생: {str(e)}", "color": "red"})
+                            continue
+                    
+                    # 수집된 게시글이 있는 경우에만 배치 분석 수행
+                    if posts_for_analysis and self.is_running:
+                        self.log_message.emit({
+                            "message": f"2단계: AI 배치 분석 시작 - 총 {len(posts_for_analysis)}개 게시글, 배치 크기: {batch_size}", 
+                            "color": "blue"
+                        })
                         
-                        # 작업 진행률 표시
-                        progress_pct = ((idx + 1) / total_items) * 100
-                        self.log_message.emit({"message": f"AI 분석 진행률: {progress_pct:.1f}% ({idx + 1}/{total_items})", "color": "blue"})
+                        # 진행상황 업데이트 - AI 분석 시작 (40% 지점부터 시작)
+                        self.progress_updated.emit({
+                            "status": "AI 분석 중",
+                            "current_page": 0,
+                            "total_items": len(posts_for_analysis),
+                            "progress": 40
+                        })
                         
-                        # 작업 간 딜레이
-                        time.sleep(0.5)
+                        # 배치 분석용 데이터 준비 - 이미 짧게 자른 내용 사용
+                        batch_posts = [{'title': p['title'], 'content': p['content']} for p in posts_for_analysis]
                         
-                    except Exception as e:
-                        self.log_message.emit({"message": f"게시글 분석 중 오류 발생: {str(e)}", "color": "red"})
-                        continue
-                
-                # 필터링된 결과 업데이트
-                search_results["items"] = filtered_items
-                search_results["total_count"] = len(filtered_items)
-                
-                self.log_message.emit({"message": f"AI 분석 완료: 총 {total_items}개 중 {len(filtered_items)}개의 게시글이 조건과 일치합니다.", "color": "green"})
+                        # 디버깅용 로그
+                        self.log_message.emit({
+                            "message": f"AI 분석 시작: 배치 크기={batch_size}, 분석할 게시글 수={len(batch_posts)}, AI 명령어='{ai_filter_command}'", 
+                            "color": "blue"
+                        })
+                        
+                        # 배치 분석 수행
+                        analysis_results = ai_generator.analyze_posts_batch(
+                            batch_posts, 
+                            ai_filter_command, 
+                            batch_size,
+                            progress_callback=self.update_batch_progress
+                        )
+                        
+                        # 디버깅용 로그
+                        self.log_message.emit({
+                            "message": f"AI 분석 결과 받음: 총 {len(analysis_results)}개 결과", 
+                            "color": "blue"
+                        })
+                        
+                        # 3단계: 분석 결과에 따라 게시글 수집
+                        self.log_message.emit({
+                            "message": f"3단계: 분석 결과 처리 - AI 분석 완료, 결과 수집 중", 
+                            "color": "blue"
+                        })
+                        
+                        # 진행상황 업데이트 - 결과 처리 시작 (80% 지점부터 시작)
+                        self.progress_updated.emit({
+                            "status": "분석 결과 처리 중",
+                            "current_page": 0,
+                            "total_items": len(analysis_results),
+                            "progress": 80
+                        })
+                        
+                        # 분석 결과에 따라 게시글 수집
+                        filtered_items = []
+                        matched_count = 0
+                        for i, is_relevant in enumerate(analysis_results):
+                            if not self.is_running:
+                                break
+                                
+                            post_data = posts_for_analysis[i]
+                            title = post_data['title']
+                            
+                            # 진행상황 업데이트
+                            progress_pct = 80 + ((i + 1) / len(analysis_results)) * 20  # 결과 처리는 80-100%
+                            self.progress_updated.emit({
+                                "status": "분석 결과 저장 중",
+                                "current_page": 0,
+                                "total_items": i + 1,
+                                "progress": int(progress_pct)
+                            })
+                            
+                            # 분석 결과가 참인 경우만 수집
+                            if is_relevant:
+                                self.log_message.emit({"message": f"✅ 일치 게시글 발견: {title}", "color": "green"})
+                                
+                                # 필터링된 게시글 목록에 추가
+                                filtered_items.append(post_data['item'])
+                                
+                                # 게시글 발견 시그널 발생
+                                self.post_found.emit({
+                                    "no": self.post_count + 1,
+                                    "id": post_data['cafe_url_id'],
+                                    "content": title,
+                                    "url": post_data['item']["url"] if post_data['item']["url"].startswith(("http://", "https://")) else "https://" + post_data['item']["url"]
+                                })
+                                
+                                # 중복 확인을 위해 수집된 제목 저장
+                                self.collected_titles.append(title)
+                                self.post_count += 1
+                                matched_count += 1
+                            else:
+                                # 일치하지 않는 경우는 간단히 로깅만
+                                if (i + 1) % 10 == 0 or i + 1 == len(analysis_results):
+                                    self.log_message.emit({
+                                        "message": f"AI 분석 결과 처리 중: {i + 1}/{len(analysis_results)}", 
+                                        "color": "gray"
+                                    })
+                        
+                        # 필터링된 결과 업데이트
+                        search_results["items"] = filtered_items
+                        search_results["total_count"] = len(filtered_items)
+                        
+                        self.log_message.emit({
+                            "message": f"AI 분석 완료: 총 {len(posts_for_analysis)}개 중 {matched_count}개의 게시글이 조건과 일치합니다.", 
+                            "color": "green"
+                        })
+                        
+                        # 진행상황 업데이트 - 모든 과정 완료 (100%)
+                        self.progress_updated.emit({
+                            "status": "분석 완료",
+                            "current_page": 0,
+                            "total_items": matched_count,
+                            "progress": 100
+                        })
             
-            else:
-                # AI 필터 없이 모든 게시글 처리
-                self.log_message.emit({"message": "AI 분석 필터가 설정되지 않았습니다. 모든 게시글을 가져옵니다.", "color": "yellow"})
+            elif ai_filter_command and len(search_results["items"]) == 0:
+                # AI 명령어는 있지만 분석할 게시글이 없는 경우 (모두 키워드 필터로 처리됨)
+                self.log_message.emit({
+                    "message": "AI 분석 대상 게시글이 없습니다. 모든 게시글이 필터 키워드로 이미 처리되었습니다.",
+                    "color": "yellow"
+                })
+            
+            elif not ai_filter_command:
+                # AI 필터 명령어가 없는 경우 - 1차 필터링된 게시글 직접 수집
+                self.log_message.emit({
+                    "message": "AI 분석 필터가 설정되지 않았습니다. 1차 필터링된 게시글을 직접 수집합니다.", 
+                    "color": "yellow"
+                })
                 
-                for idx, item in enumerate(search_results["items"]):
+                # 1차 필터링된 게시글 처리
+                for idx, item in enumerate(filtered_by_keywords):
                     if not self.is_running:
                         break
                         
@@ -358,7 +492,6 @@ class Worker(QThread):
                         
                         # 중복 확인을 위해 수집된 제목 저장
                         self.collected_titles.append(title)
-                        
                         self.post_count += 1
                         
                         # 작업 간 딜레이
@@ -407,4 +540,30 @@ class Worker(QThread):
             "current_page": current_page,
             "total_items": total_items,
             "progress": progress
+        })
+        
+    def update_batch_progress(self, batch_index, batch_count, is_processing):
+        """배치 분석 진행상황 업데이트 콜백
+        
+        Args:
+            batch_index (int): 현재 배치 인덱스
+            batch_count (int): 전체 배치 수
+            is_processing (bool): 배치 처리 중 여부
+        """
+        if not self.is_running:
+            return
+            
+        # 진행률 계산 (40%~80% 사이에서 진행)
+        batch_progress = (batch_index / batch_count) * 40
+        progress = 40 + batch_progress
+        
+        status_text = f"AI 분석 중 ({batch_index}/{batch_count} 배치)"
+        if not is_processing and batch_index == batch_count:
+            status_text = "AI 분석 완료"
+            
+        self.progress_updated.emit({
+            "status": status_text,
+            "current_page": batch_index,
+            "total_items": batch_count,
+            "progress": int(progress)
         })

@@ -175,8 +175,20 @@ class CafeAPI:
             logging.error("게시글 수집 실패: ", response_json['message'])
 
     # 게시글 내용 GET
-    def get_board_content(self, cafe_id, article_id):
-        url = f"https://apis.naver.com/cafe-web/cafe-articleapi/v2.1/cafes/{cafe_id}/articles/{article_id}?useCafeId=true&requestFrom=A"
+    def get_board_content(self, cafe_id, article_id, art_param=None):
+        """게시글 내용 가져오기
+        
+        Args:
+            cafe_id (str): 카페 ID
+            article_id (str): 게시글 ID
+            art_param (str, optional): URL의 art 매개변수. 기본값은 None.
+            
+        Returns:
+            str: 게시글 HTML 내용
+        """
+        # art 매개변수가 있으면 추가
+        art_query = f"&art={art_param}" if art_param else ""
+        url = f"https://apis.naver.com/cafe-web/cafe-articleapi/v2.1/cafes/{cafe_id}/articles/{article_id}?useCafeId=true&requestFrom=A{art_query}"
 
         try:
             response = requests.get(url, headers=self.headers)
@@ -391,7 +403,7 @@ class CafeAPI:
 if __name__ == "__main__":
     headers = {
         "referer": "https://cafe.naver.com",
-        'Cookie': "NAC=ekgyDYA9LgdUB; NNB=DHF7IQNKTWLGM; ASID=738a57c700000190da1fcdb600000080; _ga_TC04LC8Q7L=GS1.1.1733757606.1.0.1733757609.57.0.0; _ga=GA1.2.886919162.1733757607; page_uid=i9ZtRdqX5E0ss4G+pcNssssstgZ-293676; NACT=1; SRT30=1742024166; nid_inf=1966829537; NID_AUT=lN6Ytfi6N2LQbrk4YL8VXf+QhDlZ2l3YbqWThvwXl6HZRrT5NvV8vhrpgXYF+7tc; NID_SES=AAABklQJ/PPx/IL4VDXmnMF5Mh8oigbwPp5fbPSTa4ffqYfhhPqyG5WbHPXkF4Pb6clA/CaDN+cPzXXZA+ELayPbSJY3FusQhEx9yRMf6mZeZK6qQn6PRtgICJaL9q75qfw5ulsHkqQUmgR1418RHF+7sQbVdO7BRuFmn0ZsxoLkAnlF8KJvg8e0qHDcApbwEN6/3yRp3xHa3+XKa7FDoKVB5SqPwh6NUjZKla3sVNoEuA+miDGssOK1g4lGBvI97sy2YuaS4ifWZPxlIjcWXLcI7hRlhMe281eQusmpbHPXoG0RKJdS9YjoaMQOuBLkXyoys+xKYaV6/ST0pdZVANt3iu2X68+p5diW9MMUqf3PSZ+zVXeyzTNQMgClnZzY3xjE1BBh+P8XH447Kiwazp8RLQg+pJeEBLHil57sBBuM4XpFm/MtYIfQxNnH+GT6Ie7+09AOEuVqQK5hr5b9B0X7pUCzjnGIxJYFBF4cmugyetKoSORGy/dKJh1rnWBqoa/HVBKfjWhX0KAlwx3UK/cIAMqqLSFyCHAhvUzoBNznMiEJ; NID_JKL=mhqWiVyk/j+hdoyjndteVi0aLE8yEXCiRkZvrHeq6Wg=; BUC=J7qDcTt0jp3GYrC-MhD5c91FDtK-EumE0yO7vNkOohk=",
+        'Cookie': "NNB=2QP3YT6BPGMWI; ASID=31a8f9cc0000018978da1f5400000064; ncvid=#vid#_115.138.87.199IWS1; ba.uuid=a76ad3c1-5903-42bd-8399-3eb89840598c; tooltipDisplayed=true; _ga_6Z6DP60WFK=GS1.2.1726462403.1.0.1726462403.60.0.0; NFS=2; _ga_EFBDNNF91G=GS1.1.1732339996.1.0.1732339999.0.0.0; _ga_8P4PY65YZ2=GS1.1.1734265772.1.1.1734265776.56.0.0; nstore_session=uajHtGrn2P2hNissMDvcn+a3; nstore_pagesession=iI4S7lqW4vuF/ssL/6s-089597; _ga=GA1.2.877073880.1704979036; NAC=3u9QBgQ0igR4; NACT=1; SRT30=1743141766; SRT5=1743141766; page_uid=i+hJCsqosesssgcC6P0sssssto4-194872; nid_inf=1949115776; NID_AUT=8+zmUwk32jOJx1p0ofhEwAxjHO7eblG7Tp9qf1RyzUkDdCvgupodIUjhBOaBt8O+; NID_SES=AAABkUy03E8qErQxsTkguNiZudXYaou4QovWwujx5hsnzVjj/J3DyvVNvCdlkSeQQRHoqaFBKPLGn+JSwDaPZ1kzzA4SLwGqKjxSS1tCufakLrnN07YbPY0e4aZW1/5UJywoCisHyX5An1A1WPfCytQw4rbwRENbgJB+wpHSyou/7xYLdhVWODSbWQLiqptkbP8/7wkaDipvkNHNmuq6NGZ567LPtRpKXLMt1fbzNFmRVS36EdmZQ1CVr9yHatfmV2tbRWhRhpJNJcoL4FgHi1WfOf+gvkSL043DQquyCq4HfwG9pAquNJUVYgt7aqckPoPGEFu9oHY7ylSoqg83y6rcAL7qz86RBBp/kuHABKYifvPd37VV1wubQbD3aBzZHlhKR88qkTdFyP7PQ2wQFi1q6Uotwbl1H9/WWq8a9+gOQMMzc9hvIJFPQdBiAAuoT3C+GS1Ppc74SRXQYRRknzGKFBjC5Vt66ahxu332+fVT8rFmdhznZFA4qJh9ABJkoRG3uh+kDu2rVAJMDsUAwAibpPLkYE8Wo1kjlJj913R95/bj; NID_JKL=lMgrdwUp+pDlFmNt7cmh5G1egmno71yydy0tMMsCzN0=; ncu=8bb05b2d3f7a1fdefb3d7a7b80681e2cd8; nci4=be8e6c47561a77c39b75322528ddba806528d33a6d1cf308d226c4692a981db46fed585892e9e88cbf5aeda614c72dbe11afff0488d1aae0e8f7b77dd48c5f89136ffd9afde888b36680ea86ff80909aaf77131b65131e39201103025858535b232f163102323a3510370945323d184072544b486f4a7b3641507752632a5b5671586925555e796051736b664e6a5b101311090f040d0f78775e794a0c6d0209fd90e6f999eaf5e4; ncvc2=d8b84064300607b59a611f2c1aea86f04904f210357f9a25c41d25f64d6c89428b74b269b3841c3544d98f539f35924ca3d8a6a84f31226557962be82a10bd6b0d15090007766b6e031f02070504131a1c120c110a151d152f292b282a5d5e7e596b606f603e38363f21313734373d4f494853425f4248444058585e5f2e2104231c09040953536368726e68636360616266667b647b777c787070767840; BUC=kH1LHnrDpvPXKxAQ_5sZMqXm72lhfR5mLEmUfw_LYW0=",
         'user-agent': "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
     }
     
@@ -413,7 +425,9 @@ if __name__ == "__main__":
     #     print("게시글 좋아요 성공!")
     # else:
     #     print("게시글 좋아요 실패!")
-    print(cafe_api.get_board_list("31203823"))
+    # print(cafe_api.get_board_list("31203823"))
     # menu_type = M : 메모 게시판
     # board_type = T : 상품 게시판
 
+    board_content = cafe_api.get_board_content("14131753", "2231643", "ZXh0ZXJuYWwtc2VydmljZS1uYXZlci1zZWFyY2gtY2FmZS1wcg.eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJjYWZlVHlwZSI6IkNBRkVfVVJMIiwiY2FmZVVybCI6Im1wM3ZpbGdlIiwiYXJ0aWNsZUlkIjoyMjMxNjQzLCJpc3N1ZWRBdCI6MTc0MzE0MTc3NjQ1N30.itnYvf22jvr6SOctPNiPtTs_qTI1ad2uLxZ5VCG0CLo")
+    print(cafe_api.get_parse_content_html(board_content))

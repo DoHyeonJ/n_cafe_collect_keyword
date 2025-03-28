@@ -112,7 +112,7 @@ class AIGenerator:
             self.logger.info("OpenAI API 호출 중...")
             start_time = time.time()
             response = openai.chat.completions.create(
-                model="gpt-4o-mini",  # 또는 다른 적절한 모델
+                model="gpt-4o-mini",
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.1,  # 더 결정적인 응답을 위해 temperature 낮춤
                 max_tokens=500
@@ -168,6 +168,139 @@ class AIGenerator:
                 "matched_keywords": [],
                 "analysis": f"분석 중 오류 발생: {str(e)}"
             }
+
+    def analyze_posts_batch(self, posts, command, batch_size=20, progress_callback=None):
+        """여러 게시글을 배치로 처리하여 분석
+        
+        Args:
+            posts (list): 분석할 게시글 목록 (각 항목은 {'title': '제목', 'content': '내용'} 형태)
+            command (str): 필터링 명령 (예: "자동차 사고글 피해자의 글만 추출")
+            batch_size (int): 한 번에 처리할 게시글 수 (기본값: 20)
+            progress_callback (callable, optional): 진행 상황 콜백 함수
+                - 호출 시 (batch_index, batch_count, is_processing) 전달
+            
+        Returns:
+            list: 각 게시글의 분석 결과 (True/False)
+        """
+        try:
+            self.logger.info(f"배치 분석 시작: {len(posts)}개 게시글, 배치 크기: {batch_size}")
+            
+            # 결과 저장용 리스트
+            results = []
+            
+            # 전체 배치 수 계산
+            batch_count = (len(posts) + batch_size - 1) // batch_size
+            
+            # 배치 단위로 처리
+            for i in range(0, len(posts), batch_size):
+                batch_index = i // batch_size + 1
+                batch = posts[i:i+batch_size]
+                self.logger.info(f"배치 처리 중: {i+1}~{min(i+batch_size, len(posts))}/{len(posts)}")
+                
+                # 진행 상황 콜백 호출
+                if progress_callback:
+                    progress_callback(batch_index, batch_count, True)
+                
+                # 배치 내 각 게시글 정보 구성
+                batch_texts = []
+                for post in batch:
+                    title = post.get('title', '')
+                    content = post.get('content', '')
+                    # 내용은 300자로 제한하여 분석 속도 향상
+                    content_preview = content[:300] if content else ""
+                    post_text = f"제목: {title}\n내용: {content_preview}"
+                    batch_texts.append(post_text)
+                
+                # OpenAI API 설정
+                openai.api_key = self.api_key
+                
+                # 배치 분석 프롬프트 구성
+                batch_prompt = f"""
+                다음 게시글들이 "{command}" 조건에 맞는지 판단하세요.
+                
+                각 게시글마다 True 또는 False로만 답변하세요. 이유나 설명은 쓰지 마세요.
+                조건과 정확히 일치하는 경우만 True, 불확실하면 False로 응답하세요.
+                
+                게시글:
+                """
+                
+                for idx, text in enumerate(batch_texts):
+                    batch_prompt += f"\n게시글 {idx+1}:\n{text}\n"
+                
+                batch_prompt += "\n결과 (True 또는 False만 입력):\n"
+                
+                # OpenAI API 호출
+                self.logger.info("배치 분석 API 호출 중...")
+                start_time = time.time()
+                try:
+                    response = openai.chat.completions.create(
+                        model="gpt-4o-mini",
+                        messages=[{"role": "user", "content": batch_prompt}],
+                        temperature=0.1,
+                        max_tokens=200,
+                        timeout=10  # 10초 타임아웃 설정
+                    )
+                    elapsed_time = time.time() - start_time
+                    self.logger.info(f"배치 분석 API 응답 완료 (소요 시간: {elapsed_time:.2f}초)")
+                
+                    # 응답 처리
+                    analysis_text = response.choices[0].message.content.strip()
+                    self.logger.info(f"배치 분석 원본 응답:\n{analysis_text}")
+                except (openai.Timeout, TimeoutError) as e:
+                    self.logger.error(f"배치 분석 API 호출 타임아웃: {str(e)}")
+                    # 타임아웃 발생 시 모든 게시글에 대해 False 반환
+                    batch_false_values = [False] * len(batch)
+                    results.extend(batch_false_values)
+                    
+                    # 진행 상황 콜백 호출 (배치 완료)
+                    if progress_callback:
+                        progress_callback(batch_index, batch_count, False)
+                    
+                    # 다음 배치로 넘어감
+                    continue
+                
+                # True/False 결과 추출
+                true_false_values = []
+                try:
+                    lines = analysis_text.lower().split('\n')
+                    for line in lines:
+                        line = line.strip()
+                        if line == 'true':
+                            true_false_values.append(True)
+                        elif line == 'false':
+                            true_false_values.append(False)
+                except Exception as e:
+                    self.logger.error(f"응답 파싱 중 오류 발생: {str(e)}")
+                    # 파싱 오류 시 모든 게시글을 False로 처리
+                    true_false_values = [False] * len(batch)
+                
+                # 결과 개수가 일치하지 않을 경우 처리
+                if len(true_false_values) != len(batch):
+                    self.logger.error(f"배치 분석 결과 개수 불일치: 요청={len(batch)}, 응답={len(true_false_values)}")
+                    # 부족한 결과는 기본값 False로 채움
+                    while len(true_false_values) < len(batch):
+                        true_false_values.append(False)
+                    # 초과 결과는 잘라냄
+                    true_false_values = true_false_values[:len(batch)]
+                
+                # 배치 결과를 전체 결과에 추가
+                results.extend(true_false_values)
+                self.logger.info(f"배치 분석 결과: {true_false_values}")
+                
+                # 진행 상황 콜백 호출 (배치 완료)
+                if progress_callback:
+                    progress_callback(batch_index, batch_count, False)
+                
+                # API 요청 사이에 딜레이 추가
+                time.sleep(0.5)
+            
+            self.logger.info(f"전체 배치 분석 완료: 총 {len(posts)}개 게시글")
+            return results
+            
+        except Exception as e:
+            self.logger.error(f"배치 분석 중 오류 발생: {str(e)}")
+            # 오류 발생 시 모든 게시글에 대해 False 반환
+            return [False] * len(posts)
 
 if __name__ == "__main__":
     ai_generator = AIGenerator()
