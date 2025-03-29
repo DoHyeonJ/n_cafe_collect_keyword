@@ -39,6 +39,7 @@ class Worker(QThread):
         self.is_running = False
         self.post_count = 0
         self.collected_titles = []  # 중복 제거를 위한 제목 저장 리스트
+        self.collected_ids_content_pairs = set()  # 중복 제거를 위한 (아이디, 내용) 쌍 저장 집합
         self.search_api = None  # NaverCafeSearchAPI 인스턴스 저장용 (추가)
 
     def set_headers(self, headers):
@@ -163,13 +164,21 @@ class Worker(QThread):
             
             # 기존 수집된 제목 가져오기
             existing_titles = []
+            existing_id_content_pairs = set()
             try:
                 from PyQt5.QtWidgets import QTableWidgetItem
                 if hasattr(self, 'routine_tab') and hasattr(self.routine_tab, 'task_monitor'):
                     for row in range(self.routine_tab.task_monitor.rowCount()):
+                        # 제목(내용) 가져오기
                         content_item = self.routine_tab.task_monitor.item(row, 2)
-                        if content_item:
-                            existing_titles.append(content_item.text())
+                        # 아이디 가져오기
+                        id_item = self.routine_tab.task_monitor.item(row, 1)
+                        
+                        if content_item and id_item:
+                            content_text = content_item.text()
+                            id_text = id_item.text()
+                            existing_titles.append(content_text)
+                            existing_id_content_pairs.add((id_text, content_text))
             except Exception as e:
                 self.log_message.emit({"message": f"기존 게시글 확인 중 오류 발생: {str(e)}. 중복 체크를 건너뜁니다.", "color": "yellow"})
             
@@ -203,16 +212,32 @@ class Worker(QThread):
                                 "color": "green"
                             })
                             
-                            # 중복 게시글 확인
+                            # 중복 게시글 확인 (제목 및 아이디+내용 조합으로 중복 체크)
+                            is_duplicate = False
+                            
+                            # 제목 중복 확인
                             if title in self.collected_titles or title in existing_titles:
-                                self.log_message.emit({
-                                    "message": f"⚠️ 중복 게시글 건너뜀: {title}", 
-                                    "color": "yellow"
-                                })
+                                self.log_message.emit({"message": f"⚠️ 중복 게시글(제목) 건너뜀: {title}", "color": "yellow"})
+                                is_duplicate = True
+                            
+                            # 아이디+내용 조합 중복 확인
+                            id_content_pair = (item["cafe_id"], title)
+                            if id_content_pair in self.collected_ids_content_pairs or id_content_pair in existing_id_content_pairs:
+                                self.log_message.emit({"message": f"⚠️ 중복 게시글(아이디+내용) 건너뜀: {title}", "color": "yellow"})
+                                is_duplicate = True
+                            
+                            # 중복인 경우 다음 게시글로
+                            if is_duplicate:
                                 continue
                             
                             # 필터링된 게시글 목록에 추가
                             filtered_by_keywords.append(item)
+                            
+                            # 중복 확인을 위해 수집된 제목 및 아이디+내용 조합 저장
+                            # 중복 확인을 위한 조합 저장은 AI 분석 키워드가 있는 경우에만 진행
+                            self.collected_titles.append(title)
+                            self.collected_ids_content_pairs.add((item["cafe_id"], title))
+                            
                             break  # 하나의 키워드라도 매칭되면 다음 게시글로
                 
                 self.log_message.emit({
@@ -262,11 +287,6 @@ class Worker(QThread):
                         try:
                             # 게시글 제목
                             title = item["title"]
-                            
-                            # 중복 게시글 확인
-                            if title in self.collected_titles or title in existing_titles:
-                                self.log_message.emit({"message": f"⚠️ 중복 게시글 건너뜀: {title}", "color": "yellow"})
-                                continue
                             
                             # 진행상황 업데이트
                             progress_pct = ((idx + 1) / total_items) * 40  # 내용 수집은 전체 진행의 40%
@@ -417,6 +437,10 @@ class Worker(QThread):
                                 # 필터링된 게시글 목록에 추가
                                 filtered_items.append(post_data['item'])
                                 
+                                # 중복 확인을 위해 수집된 제목 및 아이디+내용 조합 저장
+                                self.collected_titles.append(title)
+                                self.collected_ids_content_pairs.add((post_data['cafe_url_id'], title))
+                                
                                 # 게시글 발견 시그널 발생
                                 self.post_found.emit({
                                     "no": self.post_count + 1,
@@ -425,8 +449,6 @@ class Worker(QThread):
                                     "url": post_data['item']["url"] if post_data['item']["url"].startswith(("http://", "https://")) else "https://" + post_data['item']["url"]
                                 })
                                 
-                                # 중복 확인을 위해 수집된 제목 저장
-                                self.collected_titles.append(title)
                                 self.post_count += 1
                                 matched_count += 1
                             else:
@@ -477,9 +499,22 @@ class Worker(QThread):
                         # 제목 가져오기
                         title = item["title"]
                         
-                        # 중복 게시글 확인
+                        # 중복 게시글 확인 (제목 및 아이디+내용 조합으로 중복 체크)
+                        is_duplicate = False
+                        
+                        # 제목 중복 확인
                         if title in self.collected_titles or title in existing_titles:
-                            self.log_message.emit({"message": f"⚠️ 중복 게시글 건너뜀: {title}", "color": "yellow"})
+                            self.log_message.emit({"message": f"⚠️ 중복 게시글(제목) 건너뜀: {title}", "color": "yellow"})
+                            is_duplicate = True
+                        
+                        # 아이디+내용 조합 중복 확인
+                        id_content_pair = (item["cafe_id"], title)
+                        if id_content_pair in self.collected_ids_content_pairs or id_content_pair in existing_id_content_pairs:
+                            self.log_message.emit({"message": f"⚠️ 중복 게시글(아이디+내용) 건너뜀: {title}", "color": "yellow"})
+                            is_duplicate = True
+                        
+                        # 중복인 경우 다음 게시글로
+                        if is_duplicate:
                             continue
                             
                         # 게시글 발견 시그널 발생
@@ -490,8 +525,10 @@ class Worker(QThread):
                             "url": item["url"] if item["url"].startswith(("http://", "https://")) else "https://" + item["url"]
                         })
                         
-                        # 중복 확인을 위해 수집된 제목 저장
+                        # 중복 확인을 위해 수집된 제목 및 아이디+내용 조합 저장
                         self.collected_titles.append(title)
+                        self.collected_ids_content_pairs.add((item["cafe_id"], title))
+                        
                         self.post_count += 1
                         
                         # 작업 간 딜레이

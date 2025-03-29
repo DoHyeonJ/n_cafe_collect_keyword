@@ -1,7 +1,7 @@
 # 네이버 카페 게시글 수집기 (Naver Cafe Post Collector)
 
 ## 빌드
-pyinstaller --onefile --noconsole --name N_CAFE_COLLECT_KEYWORD --icon=main_logo.ico main.p
+pyinstaller --onefile --noconsole --name N_CAFE_COLLECT_KEYWORD --icon=main_logo.ico main.py
 
 ## 프로그램 소개
 이 프로그램은 네이버 카페의 게시글을 검색하고 수집하는 데스크톱 애플리케이션입니다. PyQt5를 기반으로 한 GUI 인터페이스를 제공하며, OpenAI의 GPT 모델을 활용한 지능형 게시글 필터링 기능을 포함하고 있습니다.
